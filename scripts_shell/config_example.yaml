@@ -1,0 +1,67 @@
+runtime:
+  write_plots: false
+
+output:
+  output_root: results/memory_run_test
+
+experiment:
+  shots: 10000
+  # shots can also be a list aligned with p_values, e.g. [20000, 10000]
+  p_values: [0.001]
+  basis: z
+  num_rounds: 12
+  l: 12
+  m: 6
+  a_x_pows: [3]
+  a_y_pows: [1, 2]
+  b_x_pows: [1, 2]
+  b_y_pows: [3]
+  noise_mode: theoretical
+  noise_model: uniform
+  # num_circuit_samples: 5
+  # noise_sigma_rel: 0.5
+  # circuit_seed_base: 1000
+  processes: 6
+  detector_seed_base: 4
+  print_progress: true
+  # decoder alias names to run. If omitted, all aliases in decoder_variants are used.
+  decoders:
+    - bplsd
+    - bposd
+
+
+decoder_params:
+  relay-bp:
+    gamma0: 0.125
+    pre_iter: 80
+    num_sets: 100
+    set_max_iter: 60
+    gamma_dist_interval: [-0.24, 0.66]
+    stop_nconv: 1
+
+  bplsd:
+    max_iter: 20
+    bp_method: ms
+    ms_scaling_factor: 0.625
+    lsd_order: 0
+    schedule: parallel
+
+  bposd:
+    max_iter: 100
+    bp_method: ms
+    ms_scaling_factor: 0.625
+    osd_method: OSD_CS
+    osd_order: 1
+
+
+# Optional: alias decoders with per-variant params.
+# decoder_variants:
+#   relay-fast:
+#     type: relay-bp
+#     params:
+#       gamma0: 0.125
+#       pre_iter: 30
+#       num_sets: 0
+#       set_max_iter: 0
+#       gamma_dist_interval: [-0.0, 0.0]
+#       stop_nconv: 1

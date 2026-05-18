@@ -1,0 +1,21 @@
+{
+  "data_dir": "sampled_data/bb_d6_p003",
+  "reject_threshold": 1.0,
+  "decoder": {
+    "alpha": null,
+    "gamma0": 0.125,
+    "llr_clip_min": -8.0,
+    "llr_clip_max": 12.0,
+    "pre_iter": 60,
+    "num_sets": 50,
+    "set_max_iter": 60,
+    "gamma_dist_interval": [
+      -0.24,
+      0.66
+    ],
+    "stop_nconv": 1,
+    "stopping_criterion": "nconv",
+    "decoder_type": "relay",
+    "max_iter": 200
+  }
+}

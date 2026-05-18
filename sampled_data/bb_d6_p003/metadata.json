@@ -1,0 +1,9 @@
+{
+  "circuit_path": "generated_circuits/bivariate_bicycle/code=bivariate_bicycle_code_Z,d=6,rounds=6,noisemodel=uniform,p=0.003.stim",
+  "num_shots": 10000,
+  "batch_size": 2000,
+  "num_batches": 5,
+  "seed": 0,
+  "num_detectors": 252,
+  "num_observables": 12
+}

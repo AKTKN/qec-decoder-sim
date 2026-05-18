@@ -1,0 +1,27 @@
+Metadata-Version: 2.4
+Name: qec-decoder-sim
+Version: 0.1.0
+Summary: Simulator for decoder benchmarking in quantum error correction.
+Author: contributors
+License: Proprietary (set an OSS license before public release)
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: stim
+Requires-Dist: sinter
+Requires-Dist: pyyaml
+Requires-Dist: networkx
+Requires-Dist: pygltflib
+Provides-Extra: full
+Requires-Dist: pandas; extra == "full"
+Requires-Dist: pyarrow; extra == "full"
+Requires-Dist: matplotlib; extra == "full"
+Requires-Dist: pymatching; extra == "full"
+Requires-Dist: ldpc; extra == "full"
+Requires-Dist: beliefmatching; extra == "full"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: maturin; extra == "dev"

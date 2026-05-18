@@ -1,0 +1,17 @@
+{
+  "thresholds": [
+    1.0
+  ],
+  "rejection_rates": [
+    0.0005
+  ],
+  "original_lers": [
+    0.0264
+  ],
+  "post_lers": [
+    0.02641320660330165
+  ],
+  "improvement_ratios": [
+    1.0005002501250626
+  ]
+}

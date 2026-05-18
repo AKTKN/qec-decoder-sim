@@ -1,0 +1,25 @@
+# qec-decoder-sim runtime requirements (excluding Python stdlib)
+
+# Core numerics
+numpy
+scipy
+
+# QEC toolchain
+stim
+sinter
+
+# Config
+pyyaml
+
+# Graph algorithms (used in BB code circuit builder)
+networkx
+
+# Optional: decoding backends / analysis helpers
+pymatching
+ldpc
+beliefmatching
+
+# Optional: result analysis & plotting
+pandas
+pyarrow
+matplotlib
