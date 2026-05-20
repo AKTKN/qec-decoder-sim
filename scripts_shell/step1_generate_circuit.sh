@@ -11,18 +11,18 @@ export PYTHONPATH="$ROOT_DIR/src"
 "$PYTHON_BIN" -m qec_decoder_sim.circuits.generate_circuits \
 	--code surface_code_Z \
 	--out_dir generated_circuits/surface \
-	--noise_model bitflip \
+	--noise_model si1000 \
 	--rounds 1 \
-	--distance 7 9\
-	--noise_strength 0.01 0.02 0.05 0.1
+	--distance 3\
+	--noise_strength 0.001
 
 # # superdense_color_code_Z
 # "$PYTHON_BIN" -m qec_decoder_sim.circuits.generate_circuits \
 # 	--code superdense_color_code_Z \
 # 	--out_dir generated_circuits/superdense_color \
-# 	--noise_model uniform \
-# 	--rounds "d*4" \
-# 	--distance 3 5 7 9 11 13 \
+# 	--noise_model si1000 \
+# 	--rounds 2 \
+# 	--distance 3 \
 # 	--noise_strength 0.001
 
 # # bivariate_bicycle_code_Z (example parameters)
@@ -32,9 +32,11 @@ export PYTHONPATH="$ROOT_DIR/src"
 # 	--noise_model uniform \
 # 	--rounds d \
 # 	--distance 6 \
-# 	--noise_strength 0.003 0.002 0.001\
+# 	--noise_strength 0.002 0.001 \
 # 	--l 6 --m 6 \
 # 	--a_x_pows 3 \
 # 	--a_y_pows 1,2 \
 # 	--b_x_pows 1,2 \
-# 	--b_y_pows 3
+# 	--b_y_pows 3 \
+# 	--use_both \
+# 	--ibm_reproduce

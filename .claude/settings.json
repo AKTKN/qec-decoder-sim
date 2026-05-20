@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(PYTHONPATH=src python -m qec_decoder_sim.circuits.generate_circuits --code bivariate_bicycle_code_Z --out_dir /tmp/test_bb --noise_model uniform --rounds d --distance 6 --noise_strength 0.001 --l 6 --m 6 --a_x_pows 3 --a_y_pows 1,2 --b_x_pows 1,2 --b_y_pows 3 --use_both --ibm_reproduce)",
+      "Bash(PYTHONPATH=src python -m qec_decoder_sim.circuits.generate_circuits --code bivariate_bicycle_code_Z --out_dir /tmp/test_bb --noise_model si1000 --rounds d --distance 6 --noise_strength 0.001 --l 6 --m 6 --a_x_pows 3 --a_y_pows 1,2 --b_x_pows 1,2 --b_y_pows 3 --ibm_reproduce)",
+      "Bash(xargs basename -a)",
+      "Bash(python -)"
+    ]
+  }
+}

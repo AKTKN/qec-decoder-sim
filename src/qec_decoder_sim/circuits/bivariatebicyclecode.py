@@ -4,7 +4,11 @@ from typing import Literal
 
 import stim
 
-from qec_decoder_sim.circuits._bbcode_circuit_builder import BBCircuitBuildResult, build_bb_ideal_stim_circuit
+from qec_decoder_sim.circuits._bbcode_circuit_builder import (
+    BBCircuitBuildResult,
+    build_bb_ibm_noisy_stim_circuit,
+    build_bb_ideal_stim_circuit,
+)
 from qec_decoder_sim.codes.code_factory import BBCodeSpec
 from qec_decoder_sim.noise.noise_model import (
 	NoiseParameters,
@@ -40,6 +44,8 @@ class BivariateBicycleCode:
 		num_rounds: NumRounds = 1,
 		basis: Basis = "z",
 		hzh: bool | None = None,
+		use_both: bool = False,
+		ibm_reproduce: bool = False,
 	) -> None:
 		self.code_parameter = code_parameter
 		self._bbcode_spec = bbcode_spec
@@ -51,8 +57,8 @@ class BivariateBicycleCode:
 		if self.basis not in {"x", "z"}:
 			raise ValueError("basis must be either 'x' or 'z'.")
 
-		# Advanced schedule options. Keep internal for now (not part of the initial public API).
-		self.use_both = False    # default
+		self.use_both = use_both
+		self.ibm_reproduce = ibm_reproduce
 		self.hzh = (noise_model == "si1000") if hzh is None else hzh
 
 		self._validate_code_args(code_parameter=code_parameter, bbcode_spec=bbcode_spec)
@@ -139,6 +145,23 @@ class BivariateBicycleCode:
 
 	def build(self) -> BBCircuitBuildResult:
 		"""Build a (potentially) noisy stim circuit based on `noise_model`."""
+		if self.ibm_reproduce:
+			if self.noise_model not in {"uniform-cln"}:
+				raise ValueError(
+					"ibm_reproduce=True requires noise_model='uniform' (uniform-cln); "
+					f"got noise_model={self.noise_model!r}"
+				)
+			if self.p is None:
+				raise ValueError("ibm_reproduce=True requires p.")
+			spec = self._get_bbcode_spec()
+			return build_bb_ibm_noisy_stim_circuit(
+				spec,
+				num_rounds=self.num_rounds,
+				basis=self.basis,
+				use_both=self.use_both,
+				hzh=self.hzh,
+				p=self.p,
+			)
 		ideal = self.build_ideal()
 		noisy = self._apply_noise_model(ideal)
 		return BBCircuitBuildResult(circuit=noisy, metadata=ideal.metadata)

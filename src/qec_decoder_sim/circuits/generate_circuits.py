@@ -32,6 +32,8 @@ class CircuitJob:
     rounds_spec: str
     noise_model_raw: str
     noise_strength: float
+    use_both: bool = False
+    ibm_reproduce: bool = False
 
 
 def _parse_int_list(raw: str) -> tuple[int, ...]:
@@ -99,6 +101,8 @@ def _build_bb_circuit(
         p=job.noise_strength,
         num_rounds=rounds,
         basis=_basis_from_code(job.code),
+        use_both=job.use_both,
+        ibm_reproduce=job.ibm_reproduce,
     )
     return builder.get_circuit()
 
@@ -122,10 +126,13 @@ def _write_circuit(
 ) -> pathlib.Path:
     noise_tag = job.noise_model_raw.strip().lower()
     rounds = 1 if noise_tag == "bitflip" else _parse_rounds(job.rounds_spec, distance=job.distance)
-    path = out_dir / (
+    stem = (
         f"code={job.code},d={job.distance},rounds={rounds},"
-        f"noisemodel={noise_tag},p={job.noise_strength}.stim"
+        f"noisemodel={noise_tag},p={job.noise_strength}"
     )
+    if job.code == "bivariate_bicycle_code_Z":
+        stem += f",use_both={job.use_both}"
+    path = out_dir / f"{stem}.stim"
     with open(path, "w", encoding="utf-8") as handle:
         print(circuit, file=handle)
     return path
@@ -147,6 +154,8 @@ def _build_jobs(args: argparse.Namespace) -> list[CircuitJob]:
                 rounds_spec=rounds_spec,
                 noise_model_raw=noise_model_raw,
                 noise_strength=float(noise_strength),
+                use_both=args.use_both,
+                ibm_reproduce=args.ibm_reproduce,
             )
         )
     return jobs
@@ -168,6 +177,13 @@ def _validate_args(args: argparse.Namespace) -> None:
                 "bivariate_bicycle_code_Z requires " + ", ".join(f"--{name}" for name in missing)
             )
 
+    if args.ibm_reproduce:
+        non_uniform = [nm for nm in args.noise_model if nm not in {"uniform", "uniform-cln"}]
+        if non_uniform:
+            raise ValueError(
+                f"--ibm_reproduce requires --noise_model uniform; got {non_uniform}"
+            )
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate stim circuits for QEC simulation.")
@@ -185,6 +201,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--a_y_pows", type=_parse_int_list)
     parser.add_argument("--b_x_pows", type=_parse_int_list)
     parser.add_argument("--b_y_pows", type=_parse_int_list)
+    parser.add_argument("--use_both", action="store_true", default=False)
+    parser.add_argument("--ibm_reproduce", action="store_true", default=False)
 
     return parser.parse_args()
 
