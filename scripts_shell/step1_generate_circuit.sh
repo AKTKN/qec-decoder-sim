@@ -31,11 +31,37 @@ export PYTHONPATH="$ROOT_DIR/src"
 	--out_dir generated_circuits/bivariate_bicycle \
 	--noise_model uniform \
 	--rounds "d" \
-	--distance 12 \
-	--noise_strength 0.005 \
-	--l 12 --m 6 \
-	--a_x_pows 3 \
-	--a_y_pows 1,2 \
-	--b_x_pows 1,2 \
-	--b_y_pows 3 \
+	--distance 4 \
+	--noise_strength 0.001 \
+	--l 3 --m 3 \
+	--a_x_pows 1 \
+	--a_y_pows 0,2 \
+	--b_x_pows 0,2 \
+	--b_y_pows 1 \
 	--ibm_reproduce
+
+
+# =====  BB code params list =====
+# [[18, 4, 4]]
+# code, A_list, B_list = create_bivariate_bicycle_codes(3, 3, [1], [0,2], [0,2], [1])
+# d = 6
+
+# [[72,12,6]]
+# code, A_list, B_list = create_bivariate_bicycle_codes(6, 6, [3], [1,2], [1,2], [3])
+# d = 6
+
+# [[90,8,10]]
+# code, A_list, B_list = create_bivariate_bicycle_codes(15, 3, [9], [1,2], [2,7], [0])
+# d = 10
+
+# [[108,8,10]]
+# code, A_list, B_list = create_bivariate_bicycle_codes(9, 6, [3], [1,2], [1,2], [3])
+# d = 10
+
+# [[144,12,12]]
+# code, A_list, B_list = create_bivariate_bicycle_codes(12, 6, [3], [1,2], [1,2], [3])
+# d = 12
+
+# [[288,12,18]]
+# code, A_list, B_list = create_bivariate_bicycle_codes(12, 12, [3], [2,7], [1,2], [3])
+# d = 18

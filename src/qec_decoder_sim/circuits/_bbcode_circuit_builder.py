@@ -315,6 +315,208 @@ def _append_round_ibm(
     circuit.append("TICK")
 
 
+def _append_round_phenom(
+    circuit: stim.Circuit,
+    *,
+    n: int,
+    A1: np.ndarray,
+    A2: np.ndarray,
+    A3: np.ndarray,
+    B1: np.ndarray,
+    B2: np.ndarray,
+    B3: np.ndarray,
+    A1_T: np.ndarray,
+    A2_T: np.ndarray,
+    A3_T: np.ndarray,
+    B1_T: np.ndarray,
+    B2_T: np.ndarray,
+    B3_T: np.ndarray,
+    x_check_offset: int,
+    l_data_offset: int,
+    r_data_offset: int,
+    z_check_offset: int,
+    z_basis: bool,
+    use_both: bool,
+    hzh: bool,
+    repeat: bool,
+    round_index: int,
+    colors_z: list[int],
+    colors_x: list[int],
+    data_qubits: tuple[int, ...],
+    p: float,
+) -> None:
+    """One syndrome extraction round with phenomenological noise.
+
+    DEPOLARIZE1(p) is applied to all data qubits at the start of the round.
+    X_ERROR(p) / Z_ERROR(p) is inserted immediately before each ancilla
+    measurement to model imperfect syndrome readout.
+    """
+    circuit.append("DEPOLARIZE1", list(data_qubits), [p])
+
+    if not repeat:
+        for i in range(n // 2):
+            circuit.append("H", [x_check_offset + i])
+    elif hzh:
+        for i in range(n // 2):
+            circuit.append("H", [x_check_offset + i])
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [r_data_offset + int(A1_T[i]), z_check_offset + i])
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [x_check_offset + i, l_data_offset + int(A2[i])])
+        circuit.append("CNOT", [r_data_offset + int(A3_T[i]), z_check_offset + i])
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [x_check_offset + i, r_data_offset + int(B2[i])])
+        circuit.append("CNOT", [l_data_offset + int(B1_T[i]), z_check_offset + i])
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [x_check_offset + i, r_data_offset + int(B1[i])])
+        circuit.append("CNOT", [l_data_offset + int(B2_T[i]), z_check_offset + i])
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [x_check_offset + i, r_data_offset + int(B3[i])])
+        circuit.append("CNOT", [l_data_offset + int(B3_T[i]), z_check_offset + i])
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [x_check_offset + i, l_data_offset + int(A1[i])])
+        circuit.append("CNOT", [r_data_offset + int(A2_T[i]), z_check_offset + i])
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        circuit.append("CNOT", [x_check_offset + i, l_data_offset + int(A3[i])])
+        circuit.append("X_ERROR", [z_check_offset + i], [p])
+        circuit.append("MR", [z_check_offset + i])
+
+    _append_detectors_for_round(circuit, n=n, z_basis=z_basis, use_both=use_both, repeat=repeat, round_index=round_index, colors=colors_z, check_offset=z_check_offset)
+    circuit.append("TICK")
+
+    for i in range(n // 2):
+        if hzh:
+            circuit.append("H", [x_check_offset + i])
+            circuit.append("X_ERROR", [x_check_offset + i], [p])
+            circuit.append("MR", [x_check_offset + i])
+        else:
+            circuit.append("Z_ERROR", [x_check_offset + i], [p])
+            circuit.append("MRX", [x_check_offset + i])
+
+    _append_detectors_for_round_x(circuit, n=n, z_basis=z_basis, use_both=use_both, repeat=repeat, round_index=round_index, colors=colors_x, check_offset=x_check_offset)
+    circuit.append("TICK")
+
+
+def build_bb_phenom_stim_circuit(
+    spec: BBCodeSpec,
+    *,
+    num_rounds: int,
+    basis: Literal["x", "z"],
+    use_both: bool,
+    hzh: bool,
+    p: float,
+) -> BBCircuitBuildResult:
+    """Build a BB circuit under the phenomenological noise model.
+
+    Each syndrome extraction round receives:
+    - DEPOLARIZE1(p) on all data qubits (idle error during the round)
+    - X_ERROR(p) before Z-ancilla measurements (MR)
+    - Z_ERROR(p) before X-ancilla measurements (MRX), or X_ERROR(p) after H
+      when hzh=True
+
+    Gate operations themselves are ideal (no two-qubit gate noise).
+    """
+    if num_rounds < 1:
+        raise ValueError("num_rounds must be >= 1")
+
+    block_code = build_bb_block_code(spec)
+    colors_z = compute_check_colors(block_code.code.hz)
+    colors_x = compute_check_colors(block_code.code.hx)
+
+    if len(block_code.a_blocks) != 3 or len(block_code.b_blocks) != 3:
+        raise ValueError("Current BB Stim schedule requires exactly three A blocks and three B blocks.")
+
+    z_basis = basis.lower() == "z"
+    n = block_code.code.hx.shape[1]
+
+    A1, A2, A3 = (_nnz_positions(block_code.a_blocks[i]) for i in range(3))
+    B1, B2, B3 = (_nnz_positions(block_code.b_blocks[i]) for i in range(3))
+    A1_T, A2_T, A3_T = (_nnz_positions(block_code.a_blocks[i].T) for i in range(3))
+    B1_T, B2_T, B3_T = (_nnz_positions(block_code.b_blocks[i].T) for i in range(3))
+
+    x_check_offset = 0
+    l_data_offset = n // 2
+    r_data_offset = n
+    z_check_offset = 3 * n // 2
+
+    circuit = stim.Circuit()
+
+    for i in range(n // 2):
+        circuit.append("R", [x_check_offset + i])
+        circuit.append("R", [z_check_offset + i])
+
+    for i in range(n):
+        circuit.append("R" if z_basis else "RX", [l_data_offset + i])
+
+    data_qubits = tuple(range(l_data_offset, l_data_offset + n))
+
+    circuit.append("TICK")
+
+    round_args = dict(
+        n=n,
+        A1=A1, A2=A2, A3=A3,
+        B1=B1, B2=B2, B3=B3,
+        A1_T=A1_T, A2_T=A2_T, A3_T=A3_T,
+        B1_T=B1_T, B2_T=B2_T, B3_T=B3_T,
+        x_check_offset=x_check_offset,
+        l_data_offset=l_data_offset,
+        r_data_offset=r_data_offset,
+        z_check_offset=z_check_offset,
+        z_basis=z_basis,
+        use_both=use_both,
+        hzh=hzh,
+        colors_z=colors_z,
+        colors_x=colors_x,
+        data_qubits=data_qubits,
+        p=p,
+    )
+
+    for round_index in range(num_rounds):
+        _append_round_phenom(circuit, **round_args, repeat=round_index > 0, round_index=round_index)
+
+    for i in range(n):
+        circuit.append("M" if z_basis else "MX", [l_data_offset + i])
+
+    pcm = block_code.code.hz if z_basis else block_code.code.hx
+    logical_pcm = block_code.code.logicals.lz if z_basis else block_code.code.logicals.lx
+
+    colors = colors_z if z_basis else colors_x
+    check_offset = z_check_offset if z_basis else x_check_offset
+
+    for i, stabilizer in enumerate(pcm):
+        nnz = np.nonzero(stabilizer)[0]
+        targets = [stim.target_rec(-n + int(index)) for index in nnz]
+        targets.append(stim.target_rec(-n - n + i) if z_basis else stim.target_rec(-n - n // 2 + i))
+        circuit.append("DETECTOR", targets, [check_offset + i, num_rounds, colors[i]])
+
+    for i, logical in enumerate(logical_pcm):
+        nnz = np.nonzero(logical)[0]
+        targets = [stim.target_rec(-n + int(index)) for index in nnz]
+        circuit.append("OBSERVABLE_INCLUDE", targets, [i])
+
+    metadata = BBCircuitMetadata(
+        data_qubits=data_qubits,
+        x_ancilla_qubits=tuple(range(x_check_offset, x_check_offset + n // 2)),
+        z_ancilla_qubits=tuple(range(z_check_offset, z_check_offset + n // 2)),
+        num_rounds=num_rounds,
+        basis="z" if z_basis else "x",
+    )
+    return BBCircuitBuildResult(circuit=circuit, metadata=metadata)
+
+
 def build_bb_ibm_noisy_stim_circuit(
     spec: BBCodeSpec,
     *,

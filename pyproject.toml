@@ -30,6 +30,7 @@ full = [
   "pymatching",
   "ldpc",
   "beliefmatching",
+  "chromobius",
 ]
 
 dev = [

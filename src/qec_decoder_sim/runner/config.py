@@ -1,30 +1,62 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from qec_decoder_sim.decoder.sinter_registry import SUPPORTED_DECODERS
 
+# All topological (non-BB) circuit styles supported by the memory experiment runner.
+TOPOLOGICAL_CIRCUIT_TYPES: frozenset[str] = frozenset(
+    {"surface_code_Z", "superdense_color_code_Z", "midout_color_code_Z"}
+)
+
+BB_CIRCUIT_TYPE = "bivariate_bicycle_code_Z"
+
 
 @dataclass(frozen=True)
 class ExperimentConfig:
+    # --- shots / sweep ---
     shots_by_p: tuple[int, ...]
     p_values: tuple[float, ...]
+
+    # --- circuit identity ---
+    circuit_type: str
+    """Which code/circuit style to simulate.  One of TOPOLOGICAL_CIRCUIT_TYPES or BB_CIRCUIT_TYPE."""
+
     basis: str
     num_rounds: int
-    l: int
-    m: int
-    a_x_pows: tuple[int, ...]
-    a_y_pows: tuple[int, ...]
-    b_x_pows: tuple[int, ...]
-    b_y_pows: tuple[int, ...]
+
+    # --- topological code parameters (required when circuit_type != BB_CIRCUIT_TYPE) ---
+    distance: int | None
+    """Diameter / distance for topological codes.  None for BB codes."""
+
+    # --- BB code parameters (required when circuit_type == BB_CIRCUIT_TYPE) ---
+    l: int | None
+    m: int | None
+    a_x_pows: tuple[int, ...] | None
+    a_y_pows: tuple[int, ...] | None
+    b_x_pows: tuple[int, ...] | None
+    b_y_pows: tuple[int, ...] | None
+    ibm_reproduce: bool
+    use_both: bool
+
+    # --- noise ---
     noise_mode: str
     noise_model: str
     num_circuit_samples: int
     noise_sigma_rel: float
     circuit_seed_base: int
     circuit_seeds: tuple[int, ...] | None
+
+    # --- decoding ---
+    xyz_decoding: bool
+    """True (default): decode X and Z errors jointly.
+    False: filter the circuit to a single Pauli basis before building the check matrix.
+    Applies only to BP-type decoders (bposd, bplsd, relay-bp)."""
+
+    # --- execution ---
     processes: int
     detector_seed_base: int
     print_progress: bool
@@ -67,7 +99,6 @@ def load_config(
 
     noise_mode, noise_model = _parse_noise_mode_and_model(experiment)
     p_values = _parse_p_values(experiment.get("p_values", [0.002]))
-
     shots_by_p = _parse_shots(experiment.get("shots", 10000), p_values=p_values)
 
     num_circuit_samples = int(experiment.get("num_circuit_samples", 1))
@@ -93,23 +124,48 @@ def load_config(
         aliases = _parse_decoder_aliases(experiment.get("decoders"), fallback=decoder_params.keys())
         variants = _build_default_variants(aliases, decoder_params)
 
+    # Circuit type and per-type parameters
+    circuit_type = str(experiment.get("circuit", BB_CIRCUIT_TYPE)).strip()
+
+    distance_raw = experiment.get("distance")
+    distance = int(distance_raw) if distance_raw is not None else None
+
+    ibm_reproduce = bool(experiment.get("ibm_reproduce", False))
+    use_both = bool(experiment.get("use_both", False))
+    xyz_decoding = bool(experiment.get("xyz_decoding", True))
+
+    # BB-specific fields (optional — only required for BB codes)
+    l_raw = experiment.get("l")
+    m_raw = experiment.get("m")
+    l = int(l_raw) if l_raw is not None else None
+    m = int(m_raw) if m_raw is not None else None
+    a_x_pows = _parse_pow_tuple_optional(experiment.get("a_x_pows"))
+    a_y_pows = _parse_pow_tuple_optional(experiment.get("a_y_pows"))
+    b_x_pows = _parse_pow_tuple_optional(experiment.get("b_x_pows"))
+    b_y_pows = _parse_pow_tuple_optional(experiment.get("b_y_pows"))
+
     cfg = ExperimentConfig(
         shots_by_p=shots_by_p,
         p_values=p_values,
+        circuit_type=circuit_type,
         basis=str(experiment.get("basis", "z")).lower(),
         num_rounds=int(experiment.get("num_rounds", 1)),
-        l=int(experiment.get("l")),
-        m=int(experiment.get("m")),
-        a_x_pows=_parse_pow_tuple(experiment.get("a_x_pows")),
-        a_y_pows=_parse_pow_tuple(experiment.get("a_y_pows")),
-        b_x_pows=_parse_pow_tuple(experiment.get("b_x_pows")),
-        b_y_pows=_parse_pow_tuple(experiment.get("b_y_pows")),
+        distance=distance,
+        l=l,
+        m=m,
+        a_x_pows=a_x_pows,
+        a_y_pows=a_y_pows,
+        b_x_pows=b_x_pows,
+        b_y_pows=b_y_pows,
+        ibm_reproduce=ibm_reproduce,
+        use_both=use_both,
         noise_mode=str(noise_mode).lower(),
         noise_model=str(noise_model).lower(),
         num_circuit_samples=num_circuit_samples,
         noise_sigma_rel=noise_sigma_rel,
         circuit_seed_base=circuit_seed_base,
         circuit_seeds=circuit_seeds,
+        xyz_decoding=xyz_decoding,
         processes=max(1, int(experiment.get("processes", 4))),
         detector_seed_base=int(experiment.get("detector_seed_base", 1000)),
         print_progress=bool(experiment.get("print_progress", True)),
@@ -122,6 +178,10 @@ def load_config(
     write_plots = bool(runtime.get("write_plots", False))
     return cfg, variants, write_plots
 
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     try:
@@ -158,6 +218,12 @@ def _parse_p_values(raw: Any) -> tuple[float, ...]:
 def _parse_pow_tuple(raw: Any) -> tuple[int, ...]:
     if raw is None:
         raise ValueError("bb code power lists must be provided")
+    return _parse_pow_tuple_optional(raw)  # type: ignore[return-value]
+
+
+def _parse_pow_tuple_optional(raw: Any) -> tuple[int, ...] | None:
+    if raw is None:
+        return None
     if isinstance(raw, (list, tuple)):
         values = [int(v) for v in raw]
     elif isinstance(raw, str):
@@ -257,7 +323,7 @@ def _build_default_variants(
     variants: dict[str, DecoderVariant] = {}
     for alias in aliases:
         if alias not in SUPPORTED_DECODERS:
-            raise ValueError(f"Unsupported decoder: {alias}")
+            raise ValueError(f"Unsupported decoder: {alias!r}")
         params = decoder_params.get(alias, {})
         if not isinstance(params, dict):
             raise ValueError(f"decoder_params.{alias} must be a mapping")
@@ -272,15 +338,61 @@ def _parse_noise_mode_and_model(experiment: dict[str, Any]) -> tuple[str, str]:
 
 
 def _validate_experiment_config(cfg: ExperimentConfig) -> None:
+    known_types = TOPOLOGICAL_CIRCUIT_TYPES | {BB_CIRCUIT_TYPE}
+    if cfg.circuit_type not in known_types:
+        raise ValueError(
+            f"experiment.circuit must be one of {sorted(known_types)}, "
+            f"got {cfg.circuit_type!r}"
+        )
+
     if cfg.basis not in {"x", "z"}:
         raise ValueError("experiment.basis must be 'x' or 'z'")
     if cfg.num_rounds < 1:
         raise ValueError("experiment.num_rounds must be >= 1")
-    if cfg.l < 1 or cfg.m < 1:
-        raise ValueError("experiment.l and experiment.m must be >= 1")
+
+    if cfg.circuit_type == BB_CIRCUIT_TYPE:
+        # BB-specific validation
+        missing = [
+            name
+            for name, val in [
+                ("l", cfg.l), ("m", cfg.m),
+                ("a_x_pows", cfg.a_x_pows), ("a_y_pows", cfg.a_y_pows),
+                ("b_x_pows", cfg.b_x_pows), ("b_y_pows", cfg.b_y_pows),
+            ]
+            if val is None
+        ]
+        if missing:
+            raise ValueError(
+                "experiment.circuit=bivariate_bicycle_code_Z requires: "
+                + ", ".join(f"experiment.{n}" for n in missing)
+            )
+        if cfg.l < 1 or cfg.m < 1:  # type: ignore[operator]
+            raise ValueError("experiment.l and experiment.m must be >= 1")
+    else:
+        # Topological code validation
+        if cfg.distance is None or cfg.distance < 1:
+            raise ValueError(
+                f"experiment.circuit={cfg.circuit_type!r} requires experiment.distance >= 1"
+            )
+        # Warn if BB-specific options are set for topological codes
+        if cfg.ibm_reproduce:
+            warnings.warn(
+                "experiment.ibm_reproduce is ignored for topological circuit types.",
+                stacklevel=3,
+            )
+        if cfg.use_both:
+            warnings.warn(
+                "experiment.use_both is ignored for topological circuit types.",
+                stacklevel=3,
+            )
+
     if cfg.noise_mode not in {"theoretical", "realistic"}:
         raise ValueError("experiment.noise_mode must be 'theoretical' or 'realistic'")
     if cfg.noise_mode == "realistic":
+        if cfg.circuit_type != BB_CIRCUIT_TYPE:
+            raise ValueError(
+                "noise_mode='realistic' is only supported for bivariate_bicycle_code_Z"
+            )
         if cfg.num_circuit_samples < 1:
             raise ValueError("num_circuit_samples must be >= 1")
         if cfg.noise_sigma_rel < 0:

@@ -14,6 +14,7 @@ from qec_decoder_sim.codes.code_factory import BBCodeSpec
 _SUPPORTED_CODES = {
     "surface_code_Z",
     "superdense_color_code_Z",
+    "midout_color_code_Z",
     "bivariate_bicycle_code_Z",
 }
 
@@ -22,6 +23,7 @@ _NOISE_MODEL_ALIASES = {
     "uniform-cln": "uniform-cln",
     "si1000": "si1000",
     "bitflip": "bitflip",
+    "phenomenological": "phenomenological",
 }
 
 
@@ -126,8 +128,15 @@ def _write_circuit(
 ) -> pathlib.Path:
     noise_tag = job.noise_model_raw.strip().lower()
     rounds = 1 if noise_tag == "bitflip" else _parse_rounds(job.rounds_spec, distance=job.distance)
+
+    # Under the phenomenological noise model, superdense and midout color codes
+    # produce identical circuits, so we save them under the unified name.
+    code_name = job.code
+    if noise_tag == "phenomenological" and code_name in {"superdense_color_code_Z", "midout_color_code_Z"}:
+        code_name = "color_code_Z"
+
     stem = (
-        f"code={job.code},d={job.distance},rounds={rounds},"
+        f"code={code_name},d={job.distance},rounds={rounds},"
         f"noisemodel={noise_tag},p={job.noise_strength}"
     )
     if job.code == "bivariate_bicycle_code_Z":
@@ -233,7 +242,7 @@ def main() -> None:
         if job.code == "bivariate_bicycle_code_Z":
             assert bb_spec is not None
             circuit = _build_bb_circuit(job=job, bb_spec=bb_spec)
-        elif job.code in {"surface_code_Z", "superdense_color_code_Z"}:
+        elif job.code in {"surface_code_Z", "superdense_color_code_Z", "midout_color_code_Z"}:
             circuit = _build_topological_circuit(job=job)
         else:
             raise NotImplementedError(f"Circuit generation is not implemented for {job.code}")

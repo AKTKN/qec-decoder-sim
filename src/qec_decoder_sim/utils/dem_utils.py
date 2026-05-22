@@ -60,85 +60,141 @@ def detector_error_model_to_check_matrices(
     return converter(model, allow_undecomposed_hyperedges=allow_undecomposed_hyperedges, **converter_kwargs)
 
 
-def filter_detectors_by_basis(
+# === not robust === use filter_dem_by_basis instead
+# def filter_detectors_by_basis(
+#     circuit: stim.Circuit,
+#     basis: str,
+#     qubits: list[int] | None = None,
+# ) -> stim.Circuit | tuple[stim.Circuit, list[str]]:
+#     """Return a new circuit filtering any detectors which do not detect the specified basis for the input qubits.
+
+#     Args:
+#         circuit: The original circuit
+#         basis: "X" or "Z"
+#         qubits: Data qubits to inject test errors on. Should typically be data qubits. Defaults
+#             to automatically detected data qubits which may not be robust.
+
+#     returns:
+#         The filtered circuit
+#     """
+#     assert basis in ("X", "Z")
+
+#     pauli_error = "Z" if basis == "X" else "X"
+
+#     circuit = circuit.flattened()
+
+#     noiseless_circuit = circuit.without_noise()
+#     sampler = noiseless_circuit.compile_detector_sampler()
+#     reference_detectors, reference_observables = sampler.sample(
+#         1, separate_observables=True
+#     )
+#     reference_detectors = reference_detectors[0, :]
+#     reference_observables = reference_observables[0, :]
+#     num_detectors = len(reference_detectors)
+
+#     detector_is_sensitive = np.full(num_detectors, False, dtype=bool)
+
+#     if qubits is None:
+#         from relay_bp.stim.noise import detect_data_qubits
+#         to_test = detect_data_qubits(noiseless_circuit)
+#     else:
+#         to_test = qubits
+
+#     to_test_set = set(to_test)
+
+#     inst_idx = 0
+#     while to_test:
+#         for qubit in to_test:
+#             injected_circuit = stim.Circuit()
+#             injected_circuit += noiseless_circuit
+#             injected_circuit.insert(
+#                 inst_idx,
+#                 stim.CircuitInstruction(f"{pauli_error}_ERROR", [qubit], [1.0]),
+#             )
+
+#             injected_sampler = injected_circuit.compile_detector_sampler()
+#             injected_detectors, injected_observables = injected_sampler.sample(
+#                 1, separate_observables=True
+#             )
+#             injected_detectors = injected_detectors[0, :]
+#             injected_observables = injected_observables[0, :]
+
+#             detectors_flipped = np.where(reference_detectors != injected_detectors)
+#             detector_is_sensitive[detectors_flipped] = True
+
+#         to_test = []
+#         for inst in noiseless_circuit[inst_idx:]:
+#             # Is a reset we must inject errors after
+#             inst_idx += 1
+#             if inst.name.startswith("R") or inst.name.startswith("M"):
+#                 to_test = list(to_test_set)
+#                 break
+
+#     filtered_circuit = stim.Circuit()
+#     detector_idx = 0
+#     for inst in circuit:
+#         if inst.name == "DETECTOR":
+#             to_insert = detector_is_sensitive[detector_idx]
+#             detector_idx += 1
+#             if not to_insert:
+#                 continue
+#         filtered_circuit.append(inst)
+#     return filtered_circuit
+
+
+def filter_circuit_by_basis(
     circuit: stim.Circuit,
-    basis: str,
-    qubits: list[int] | None = None,
-) -> stim.Circuit | tuple[stim.Circuit, list[str]]:
-    """Return a new circuit filtering any detectors which do not detect the specified basis for the input qubits.
+    remove_basis: str,
+    coord_basis_map: dict[int, str] | None = None,
+) -> stim.Circuit:
+    """Return a new circuit with DETECTOR instructions of the specified basis removed.
+
+    Detector basis is determined by the 4th coordinate of each DETECTOR instruction,
+    mapped through coord_basis_map (defaults to CHROMOBIUS_COORD_BASIS_MAP).
+    Uses circuit.get_detector_coordinates() which resolves SHIFT_COORDS offsets, so
+    coordinates are always absolute.
+
+    Unlike filter_dem_by_basis (which operates on a DetectorErrorModel), this function
+    operates on the raw Stim circuit.  Removing detectors here ensures that sinter's
+    detection-event sampler never sees the removed detectors — necessary when xyz_decoding
+    is False and BP decoders should only observe one Pauli basis.
 
     Args:
-        circuit: The original circuit
-        basis: "X" or "Z"
-        qubits: Data qubits to inject test errors on. Should typically be data qubits. Defaults
-            to automatically detected data qubits which may not be robust.
+        circuit: The source Stim circuit.  Must contain DETECTOR instructions with at
+            least 4 coordinate arguments for basis identification.
+        remove_basis: ``"X"`` or ``"Z"`` — detectors whose 4th coordinate maps to this
+            basis are removed from the returned circuit.
+        coord_basis_map: Maps each 4th-coordinate integer value to ``"X"`` or ``"Z"``.
+            Defaults to ``CHROMOBIUS_COORD_BASIS_MAP``.  Detectors whose 4th coordinate
+            is absent from the map are kept.
 
-    returns:
-        The filtered circuit
+    Returns:
+        A new ``stim.Circuit`` (flattened) with the identified DETECTOR instructions
+        removed.  All other instructions are preserved unchanged.
     """
-    assert basis in ("X", "Z")
+    assert remove_basis in ("X", "Z"), f"remove_basis must be 'X' or 'Z', got {remove_basis!r}"
+    if coord_basis_map is None:
+        coord_basis_map = CHROMOBIUS_COORD_BASIS_MAP
 
-    pauli_error = "Z" if basis == "X" else "X"
+    # get_detector_coordinates() returns absolute coords (SHIFT_COORDS already applied)
+    det_coords: dict[int, tuple[float, ...]] = circuit.get_detector_coordinates()
 
-    circuit = circuit.flattened()
+    detectors_to_remove: set[int] = {
+        idx
+        for idx, coords in det_coords.items()
+        if len(coords) >= 4 and coord_basis_map.get(int(coords[3])) == remove_basis
+    }
 
-    noiseless_circuit = circuit.without_noise()
-    sampler = noiseless_circuit.compile_detector_sampler()
-    reference_detectors, reference_observables = sampler.sample(
-        1, separate_observables=True
-    )
-    reference_detectors = reference_detectors[0, :]
-    reference_observables = reference_observables[0, :]
-    num_detectors = len(reference_detectors)
-
-    detector_is_sensitive = np.full(num_detectors, False, dtype=bool)
-
-    if qubits is None:
-        from relay_bp.stim.noise import detect_data_qubits
-        to_test = detect_data_qubits(noiseless_circuit)
-    else:
-        to_test = qubits
-
-    to_test_set = set(to_test)
-
-    inst_idx = 0
-    while to_test:
-        for qubit in to_test:
-            injected_circuit = stim.Circuit()
-            injected_circuit += noiseless_circuit
-            injected_circuit.insert(
-                inst_idx,
-                stim.CircuitInstruction(f"{pauli_error}_ERROR", [qubit], [1.0]),
-            )
-
-            injected_sampler = injected_circuit.compile_detector_sampler()
-            injected_detectors, injected_observables = injected_sampler.sample(
-                1, separate_observables=True
-            )
-            injected_detectors = injected_detectors[0, :]
-            injected_observables = injected_observables[0, :]
-
-            detectors_flipped = np.where(reference_detectors != injected_detectors)
-            detector_is_sensitive[detectors_flipped] = True
-
-        to_test = []
-        for inst in noiseless_circuit[inst_idx:]:
-            # Is a reset we must inject errors after
-            inst_idx += 1
-            if inst.name.startswith("R") or inst.name.startswith("M"):
-                to_test = list(to_test_set)
-                break
-
-    filtered_circuit = stim.Circuit()
+    new_circuit = stim.Circuit()
     detector_idx = 0
-    for inst in circuit:
-        if inst.name == "DETECTOR":
-            to_insert = detector_is_sensitive[detector_idx]
+    for instruction in circuit.flattened():
+        if instruction.name == "DETECTOR":
+            if detector_idx not in detectors_to_remove:
+                new_circuit.append(instruction)
             detector_idx += 1
-            if not to_insert:
-                continue
-        filtered_circuit.append(inst)
-    return filtered_circuit
+        else:
+            new_circuit.append(instruction)
+    return new_circuit
 
 
 def filter_dem_by_basis(

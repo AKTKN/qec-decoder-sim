@@ -24,12 +24,13 @@ _ensure_chromobius_on_path()
 import gen  # type: ignore
 from clorco._make_circuit import make_circuit as _chromobius_make_circuit  # type: ignore
 
-NoiseModelName = Literal["uniform", "si1000", "bitflip"]
-TopologicalStyle = Literal["surface_code_Z", "superdense_color_code_Z"]
+NoiseModelName = Literal["uniform", "si1000", "bitflip", "phenomenological"]
+TopologicalStyle = Literal["surface_code_Z", "superdense_color_code_Z", "midout_color_code_Z"]
 
 _STYLE_MAP: dict[str, str] = {
     "surface_code_Z": "surface_code_Z",
     "superdense_color_code_Z": "superdense_color_code_Z",
+    "midout_color_code_Z": "midout_color_code_Z",
 }
 
 _NOISE_MODEL_BUILDERS: dict[str, Callable[[float], "gen.NoiseModel"]] = {
@@ -79,7 +80,51 @@ def _make_bitflip_code_capacity_circuit(
         code = make_color_code_layout_for_superdense(base_data_width=diameter).z_basis_subset()
         return code.make_code_capacity_circuit(noise=noise_rule, extra_coords_func=color_f2c)
 
+    if style_key == "midout_color_code_Z":
+        raise ValueError(
+            "midout_color_code_Z does not support the 'bitflip' noise model. "
+            "Use 'uniform' or 'si1000' instead."
+        )
+
     raise ValueError(f"Unsupported style for bitflip: {style_key!r}")
+
+
+def _make_phenom_topological_circuit(
+    *,
+    style_key: str,
+    rounds: int,
+    diameter: int,
+    noise_strength: float,
+) -> stim.Circuit:
+    """Generate a phenomenological-noise circuit for surface or color codes.
+
+    Uses make_phenom_circuit from the StabilizerCode class, which applies
+    DEPOLARIZE1(p) to all data qubits and flip_result=p to all measurements
+    in each syndrome extraction round.
+
+    Both superdense_color_code_Z and midout_color_code_Z produce the same
+    circuit under this noise model (the smooth color code layout).
+    """
+    noise = float(noise_strength)
+
+    if style_key == "surface_code_Z":
+        from clorco.surface_code._surface_code_layouts import make_surface_code_layout  # type: ignore
+        from clorco.surface_code._keyed_constructions import f2c  # type: ignore
+        code = make_surface_code_layout(width=diameter, height=diameter)
+        return code.make_phenom_circuit(noise=noise, rounds=rounds, extra_coords_func=f2c)
+
+    if style_key in {"superdense_color_code_Z", "midout_color_code_Z"}:
+        from clorco.color_code._color_code_layouts import make_color_code_layout  # type: ignore
+        from clorco.color_code._keyed_constructions import f2c as color_f2c  # type: ignore
+        code = make_color_code_layout(
+            base_width=diameter,
+            coord_style="rect",
+            single_rgb_layer_instead_of_actual_code=False,
+            spurs="smooth",
+        )
+        return code.make_phenom_circuit(noise=noise, rounds=rounds, extra_coords_func=color_f2c)
+
+    raise ValueError(f"Unsupported style for phenomenological noise model: {style_key!r}")
 
 
 def make_topological_memory_circuit(
@@ -98,10 +143,10 @@ def make_topological_memory_circuit(
         )
 
     noise_key = noise_model.strip().lower()
-    if noise_key not in _NOISE_MODEL_BUILDERS:
+    if noise_key not in _NOISE_MODEL_BUILDERS and noise_key != "phenomenological":
         raise ValueError(
-            "Topological circuits only support noise_model 'uniform', 'si1000', or 'bitflip'. "
-            f"Got {noise_model!r}"
+            "Topological circuits only support noise_model 'uniform', 'si1000', 'bitflip', "
+            f"or 'phenomenological'. Got {noise_model!r}"
         )
 
     if rounds < 1:
@@ -110,6 +155,14 @@ def make_topological_memory_circuit(
         raise ValueError("diameter must be >= 1")
     if noise_strength < 0:
         raise ValueError("noise_strength must be >= 0")
+
+    if noise_key == "phenomenological":
+        return _make_phenom_topological_circuit(
+            style_key=style_key,
+            rounds=int(rounds),
+            diameter=int(diameter),
+            noise_strength=float(noise_strength),
+        )
 
     if noise_key == "bitflip":
         return _make_bitflip_code_capacity_circuit(

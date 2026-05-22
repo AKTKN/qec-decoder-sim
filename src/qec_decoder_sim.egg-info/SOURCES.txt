@@ -128,6 +128,7 @@ src/qec_decoder_sim/decoder/sinter_registry.py
 src/qec_decoder_sim/noise/__init__.py
 src/qec_decoder_sim/noise/noise_model.py
 src/qec_decoder_sim/runner/__init__.py
+src/qec_decoder_sim/runner/circuit_builder.py
 src/qec_decoder_sim/runner/collecter.py
 src/qec_decoder_sim/runner/config.py
 src/qec_decoder_sim/runner/run_memory_experiment.py
@@ -137,3 +138,4 @@ src/qec_decoder_sim/sampling/__main__.py
 src/qec_decoder_sim/sampling/sampler.py
 src/qec_decoder_sim/utils/__init__.py
 src/qec_decoder_sim/utils/dem_utils.py
+tests/test_extended_memory_experiment.py

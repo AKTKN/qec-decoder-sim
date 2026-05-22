@@ -8,6 +8,7 @@ from qec_decoder_sim.circuits._bbcode_circuit_builder import (
     BBCircuitBuildResult,
     build_bb_ibm_noisy_stim_circuit,
     build_bb_ideal_stim_circuit,
+    build_bb_phenom_stim_circuit,
 )
 from qec_decoder_sim.codes.code_factory import BBCodeSpec
 from qec_decoder_sim.noise.noise_model import (
@@ -17,7 +18,7 @@ from qec_decoder_sim.noise.noise_model import (
 	uniform_circuit_level,
 )
 
-NoiseModelName = Literal["code_capacity", "uniform-cln", "si1000", "custom"]
+NoiseModelName = Literal["code_capacity", "uniform-cln", "si1000", "phenomenological", "custom"]
 Basis = Literal["x", "z"]
 NumRounds = int | Literal["d"]
 
@@ -155,6 +156,18 @@ class BivariateBicycleCode:
 				raise ValueError("ibm_reproduce=True requires p.")
 			spec = self._get_bbcode_spec()
 			return build_bb_ibm_noisy_stim_circuit(
+				spec,
+				num_rounds=self.num_rounds,
+				basis=self.basis,
+				use_both=self.use_both,
+				hzh=self.hzh,
+				p=self.p,
+			)
+		if self.noise_model == "phenomenological":
+			if self.p is None:
+				raise ValueError("noise_model='phenomenological' requires p.")
+			spec = self._get_bbcode_spec()
+			return build_bb_phenom_stim_circuit(
 				spec,
 				num_rounds=self.num_rounds,
 				basis=self.basis,
