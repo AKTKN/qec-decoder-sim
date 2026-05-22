@@ -26,11 +26,11 @@ class ExperimentConfig:
     """Which code/circuit style to simulate.  One of TOPOLOGICAL_CIRCUIT_TYPES or BB_CIRCUIT_TYPE."""
 
     basis: str
-    num_rounds: int
 
     # --- topological code parameters (required when circuit_type != BB_CIRCUIT_TYPE) ---
-    distance: int | None
-    """Diameter / distance for topological codes.  None for BB codes."""
+    distances: tuple[int, ...] | None
+    """Diameter / distance sweep for topological codes.  None for BB codes.
+    A single-element tuple runs one distance; a multi-element tuple sweeps all values."""
 
     # --- BB code parameters (required when circuit_type == BB_CIRCUIT_TYPE) ---
     l: int | None
@@ -41,6 +41,13 @@ class ExperimentConfig:
     b_y_pows: tuple[int, ...] | None
     ibm_reproduce: bool
     use_both: bool
+
+    # --- rounds spec ---
+    num_rounds_spec: str
+    """Number of syndrome-extraction rounds per shot.
+    Accepts a positive integer (e.g. ``"12"``), ``"d"`` (= distance), or
+    ``"k*d"`` / ``"d*k"`` (= k × distance).  For BB codes only integer strings
+    are valid (distance is not a single well-defined scalar there)."""
 
     # --- noise ---
     noise_mode: str
@@ -127,8 +134,9 @@ def load_config(
     # Circuit type and per-type parameters
     circuit_type = str(experiment.get("circuit", BB_CIRCUIT_TYPE)).strip()
 
-    distance_raw = experiment.get("distance")
-    distance = int(distance_raw) if distance_raw is not None else None
+    distances = _parse_distances(experiment.get("distance"))
+
+    num_rounds_spec = _parse_num_rounds_spec(experiment.get("num_rounds", 1))
 
     ibm_reproduce = bool(experiment.get("ibm_reproduce", False))
     use_both = bool(experiment.get("use_both", False))
@@ -149,8 +157,8 @@ def load_config(
         p_values=p_values,
         circuit_type=circuit_type,
         basis=str(experiment.get("basis", "z")).lower(),
-        num_rounds=int(experiment.get("num_rounds", 1)),
-        distance=distance,
+        distances=distances,
+        num_rounds_spec=num_rounds_spec,
         l=l,
         m=m,
         a_x_pows=a_x_pows,
@@ -213,6 +221,40 @@ def _parse_p_values(raw: Any) -> tuple[float, ...]:
     if not vals:
         raise ValueError("experiment.p_values must be non-empty")
     return tuple(vals)
+
+
+def _parse_distances(raw: Any) -> tuple[int, ...] | None:
+    """Parse ``distance`` YAML value into a tuple of ints, or None if absent."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return (raw,)
+    if isinstance(raw, list):
+        if not raw:
+            raise ValueError("experiment.distance list must be non-empty")
+        return tuple(int(v) for v in raw)
+    if isinstance(raw, str):
+        parts = [x.strip() for x in raw.split(",") if x.strip()]
+        if not parts:
+            raise ValueError("experiment.distance csv must be non-empty")
+        return tuple(int(v) for v in parts)
+    raise ValueError("experiment.distance must be an int, list[int], or csv string")
+
+
+def _parse_num_rounds_spec(raw: Any) -> str:
+    """Normalise the ``num_rounds`` YAML value to a string spec.
+
+    Accepts:
+    - positive integer  → ``"12"``
+    - string ``"d"``    → ``"d"``
+    - string ``"k*d"``  → ``"k*d"``
+    """
+    if isinstance(raw, int):
+        return str(raw)
+    s = str(raw).strip()
+    if not s:
+        raise ValueError("experiment.num_rounds must not be empty")
+    return s
 
 
 def _parse_pow_tuple(raw: Any) -> tuple[int, ...]:
@@ -347,8 +389,6 @@ def _validate_experiment_config(cfg: ExperimentConfig) -> None:
 
     if cfg.basis not in {"x", "z"}:
         raise ValueError("experiment.basis must be 'x' or 'z'")
-    if cfg.num_rounds < 1:
-        raise ValueError("experiment.num_rounds must be >= 1")
 
     if cfg.circuit_type == BB_CIRCUIT_TYPE:
         # BB-specific validation
@@ -368,12 +408,30 @@ def _validate_experiment_config(cfg: ExperimentConfig) -> None:
             )
         if cfg.l < 1 or cfg.m < 1:  # type: ignore[operator]
             raise ValueError("experiment.l and experiment.m must be >= 1")
+        # For BB codes num_rounds_spec must be a plain integer (distance is not available)
+        try:
+            nr = int(cfg.num_rounds_spec)
+            if nr < 1:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ValueError(
+                "experiment.num_rounds for bivariate_bicycle_code_Z must be a positive "
+                f"integer; got {cfg.num_rounds_spec!r}"
+            )
     else:
         # Topological code validation
-        if cfg.distance is None or cfg.distance < 1:
+        if not cfg.distances:
             raise ValueError(
-                f"experiment.circuit={cfg.circuit_type!r} requires experiment.distance >= 1"
+                f"experiment.circuit={cfg.circuit_type!r} requires experiment.distance "
+                "(int or list of ints)"
             )
+        for d in cfg.distances:
+            if d < 1:
+                raise ValueError(
+                    f"experiment.distance values must be >= 1; got {d}"
+                )
+        # Validate num_rounds_spec is parseable (distance-free check; full check at build time)
+        _validate_num_rounds_spec(cfg.num_rounds_spec)
         # Warn if BB-specific options are set for topological codes
         if cfg.ibm_reproduce:
             warnings.warn(
@@ -401,3 +459,23 @@ def _validate_experiment_config(cfg: ExperimentConfig) -> None:
             raise ValueError("circuit_seed_base must be >= 0")
         if cfg.circuit_seeds is not None and len(cfg.circuit_seeds) != cfg.num_circuit_samples:
             raise ValueError("circuit_seeds length must match num_circuit_samples")
+
+
+def _validate_num_rounds_spec(spec: str) -> None:
+    """Raise ValueError if spec is not a valid num_rounds expression."""
+    s = spec.strip().lower().replace(" ", "")
+    if not s:
+        raise ValueError("experiment.num_rounds must not be empty")
+    if s.isdigit():
+        if int(s) < 1:
+            raise ValueError(f"experiment.num_rounds must be >= 1; got {spec!r}")
+        return
+    if s == "d":
+        return
+    if s.endswith("*d") and s[:-2].isdigit() and int(s[:-2]) >= 1:
+        return
+    if s.startswith("d*") and s[2:].isdigit() and int(s[2:]) >= 1:
+        return
+    raise ValueError(
+        f"experiment.num_rounds must be a positive integer, 'd', or 'k*d'; got {spec!r}"
+    )

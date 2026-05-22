@@ -38,10 +38,39 @@ _TOPOLOGICAL_NOISE_MAP: dict[str, str] = {
 }
 
 
+def resolve_num_rounds(spec: str, *, distance: int) -> int:
+    """Resolve a num_rounds spec string to a concrete integer for one distance.
+
+    Args:
+        spec: One of: a positive integer string (e.g. ``"12"``), ``"d"``, or
+              ``"k*d"`` / ``"d*k"`` (e.g. ``"3*d"``).
+        distance: The code diameter / distance used when the spec contains ``"d"``.
+
+    Returns:
+        The resolved number of rounds as a positive integer.
+    """
+    s = spec.strip().lower().replace(" ", "")
+    if s.isdigit():
+        return int(s)
+    if s == "d":
+        return distance
+    if s.endswith("*d") and s[:-2].isdigit():
+        return int(s[:-2]) * distance
+    if s.startswith("d*") and s[2:].isdigit():
+        return int(s[2:]) * distance
+    raise ValueError(
+        f"Invalid num_rounds spec {spec!r}. "
+        "Use a positive integer, 'd', or 'k*d' (e.g. '3*d')."
+    )
+
+
 def build_circuit(
     cfg: ExperimentConfig,
     p: float,
     circuit_seed: int | None,
+    *,
+    distance: int | None,
+    num_rounds: int,
 ) -> stim.Circuit:
     """Build and return a noisy Stim circuit for one point in the experiment sweep.
 
@@ -49,14 +78,18 @@ def build_circuit(
         cfg: Experiment configuration (circuit type, noise model, code params, etc.).
         p: Noise strength (error probability) for this sweep point.
         circuit_seed: RNG seed for realistic noise mode; None in theoretical mode.
+        distance: Code diameter for topological codes; ``None`` for BB codes.
+        num_rounds: Resolved number of syndrome-extraction rounds (already computed
+            from ``cfg.num_rounds_spec`` and ``distance`` by the caller).
 
     Returns:
         A noisy ``stim.Circuit`` ready to be sampled or converted to a DEM.
     """
     if cfg.circuit_type == BB_CIRCUIT_TYPE:
-        return _build_bb_circuit(cfg, p, circuit_seed)
+        return _build_bb_circuit(cfg, p, circuit_seed, num_rounds=num_rounds)
     else:
-        return _build_topological_circuit(cfg, p)
+        assert distance is not None
+        return _build_topological_circuit(cfg, p, distance=distance, num_rounds=num_rounds)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +100,8 @@ def _build_bb_circuit(
     cfg: ExperimentConfig,
     p: float,
     circuit_seed: int | None,
+    *,
+    num_rounds: int,
 ) -> stim.Circuit:
     noise_model = _resolve_noise_model(cfg.noise_model)
     spec = _build_bbcode_spec(cfg)
@@ -80,7 +115,7 @@ def _build_bb_circuit(
             bbcode_spec=spec,
             noise_model=noise_model,
             p=p,
-            num_rounds=cfg.num_rounds,
+            num_rounds=num_rounds,
             basis=cfg.basis,
             use_both=cfg.use_both,
             ibm_reproduce=cfg.ibm_reproduce,
@@ -98,7 +133,7 @@ def _build_bb_circuit(
             bbcode_spec=spec,
             noise_model=noise_model,
             p=p,
-            num_rounds=cfg.num_rounds,
+            num_rounds=num_rounds,
             basis=cfg.basis,
             use_both=cfg.use_both,
             ibm_reproduce=cfg.ibm_reproduce,
@@ -124,7 +159,13 @@ def _build_bbcode_spec(cfg: ExperimentConfig) -> BBCodeSpec:
 # Topological code path
 # ---------------------------------------------------------------------------
 
-def _build_topological_circuit(cfg: ExperimentConfig, p: float) -> stim.Circuit:
+def _build_topological_circuit(
+    cfg: ExperimentConfig,
+    p: float,
+    *,
+    distance: int,
+    num_rounds: int,
+) -> stim.Circuit:
     if cfg.noise_mode == "realistic":
         raise ValueError(
             "noise_mode='realistic' is not supported for topological circuit types. "
@@ -135,11 +176,10 @@ def _build_topological_circuit(cfg: ExperimentConfig, p: float) -> stim.Circuit:
     # make_topological_memory_circuit expects the short names "uniform"/"si1000"/"bitflip"
     topo_noise = _TOPOLOGICAL_NOISE_MAP.get(noise_model_key, noise_model_key)
 
-    assert cfg.distance is not None
     return make_topological_memory_circuit(
         style=cfg.circuit_type,
-        rounds=cfg.num_rounds,
-        diameter=cfg.distance,
+        rounds=num_rounds,
+        diameter=distance,
         noise_model=topo_noise,
         noise_strength=p,
     )

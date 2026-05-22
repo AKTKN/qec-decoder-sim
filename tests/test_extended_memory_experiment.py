@@ -3,13 +3,12 @@
 Covers all requirements added in the surface/color code extension:
   1. midout_color_code_Z circuit generation
   2. filter_circuit_by_basis()
-  3. Config loading for topological codes and BB codes with new fields
-  4. Task building: MWPM (decompose_errors, built-in pymatching), xyz_decoding, chromobius
+  3. Config loading for topological codes and BB codes (distances list, num_rounds_spec)
+  4. Task building: MWPM, xyz_decoding, distance sweep, metadata correctness
   5. Backward compatibility with existing BB YAML configs
 """
 from __future__ import annotations
 
-import io
 import sys
 import textwrap
 from pathlib import Path
@@ -53,6 +52,20 @@ def _load_cfg_from_yaml(yaml_str: str, repo_root: Path):
         return load_config(tmp, repo_root=repo_root)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _build_circuit_from_cfg(cfg, p=0.001):
+    """Helper to call build_circuit with the right resolved distance/num_rounds."""
+    from qec_decoder_sim.runner.circuit_builder import build_circuit, resolve_num_rounds
+    from qec_decoder_sim.runner.config import BB_CIRCUIT_TYPE
+
+    if cfg.circuit_type == BB_CIRCUIT_TYPE:
+        distance = None
+        num_rounds = int(cfg.num_rounds_spec)
+    else:
+        distance = cfg.distances[0]
+        num_rounds = resolve_num_rounds(cfg.num_rounds_spec, distance=distance)
+    return build_circuit(cfg=cfg, p=p, circuit_seed=None, distance=distance, num_rounds=num_rounds)
 
 
 # ---------------------------------------------------------------------------
@@ -153,10 +166,7 @@ class TestFilterCircuitByBasis:
                 assert basis is None, "All basis-labelled detectors should be gone"
 
     def test_roundtrip_consistency_with_filter_dem_by_basis(self):
-        """filter_circuit_by_basis + DEM ≡ filter_dem_by_basis applied to the full DEM.
-
-        Both approaches should produce a DEM with the same number of detectors.
-        """
+        """filter_circuit_by_basis + DEM ≡ filter_dem_by_basis applied to the full DEM."""
         from qec_decoder_sim.utils.dem_utils import filter_circuit_by_basis, filter_dem_by_basis
 
         circuit = _make_surface_code_circuit(d=3, rounds=2)
@@ -164,10 +174,7 @@ class TestFilterCircuitByBasis:
             decompose_errors=False, ignore_decomposition_failures=True
         )
 
-        # Path A: filter DEM directly
         filtered_dem = filter_dem_by_basis(full_dem, remove_basis="X")
-
-        # Path B: filter circuit, then build DEM
         filtered_circuit = filter_circuit_by_basis(circuit, remove_basis="X")
         circuit_dem = filtered_circuit.detector_error_model(
             decompose_errors=False, ignore_decomposition_failures=True
@@ -231,10 +238,10 @@ output:
 experiment:
   circuit: surface_code_Z
   distance: 5
+  num_rounds: 5
   shots: 100
   p_values: [0.001]
   basis: z
-  num_rounds: 5
   noise_mode: theoretical
   noise_model: uniform
   processes: 1
@@ -249,10 +256,10 @@ output:
 experiment:
   circuit: midout_color_code_Z
   distance: 3
+  num_rounds: 3
   shots: 100
   p_values: [0.001]
   basis: z
-  num_rounds: 3
   noise_mode: theoretical
   noise_model: uniform
   xyz_decoding: false
@@ -261,6 +268,24 @@ experiment:
 decoder_params:
   bplsd:
     max_iter: 5
+"""
+
+_SURFACE_MULTI_D_YAML = """\
+runtime:
+  write_plots: false
+output:
+  output_root: results/test
+experiment:
+  circuit: surface_code_Z
+  distance: [3, 5, 7]
+  num_rounds: "d"
+  shots: 50
+  p_values: [0.001, 0.005]
+  basis: z
+  noise_mode: theoretical
+  noise_model: uniform
+  processes: 1
+  decoders: [mwpm]
 """
 
 
@@ -278,20 +303,35 @@ class TestConfigLoading:
         assert cfg.a_y_pows == (1, 2)
         assert cfg.b_x_pows == (1, 2)
         assert cfg.b_y_pows == (3,)
+        assert cfg.num_rounds_spec == "3"
         assert cfg.xyz_decoding is True  # default
 
     def test_surface_code_yaml_parsed(self, tmp_path):
         cfg, _, _ = _load_cfg_from_yaml(_SURFACE_YAML, tmp_path)
         assert cfg.circuit_type == "surface_code_Z"
-        assert cfg.distance == 5
+        assert cfg.distances == (5,)
+        assert cfg.num_rounds_spec == "5"
         assert cfg.l is None
         assert cfg.m is None
 
     def test_midout_yaml_xyz_decoding_false(self, tmp_path):
         cfg, _, _ = _load_cfg_from_yaml(_MIDOUT_YAML, tmp_path)
         assert cfg.circuit_type == "midout_color_code_Z"
-        assert cfg.distance == 3
+        assert cfg.distances == (3,)
         assert cfg.xyz_decoding is False
+
+    def test_distance_list_parsed_as_tuple(self, tmp_path):
+        cfg, _, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        assert cfg.distances == (3, 5, 7)
+
+    def test_num_rounds_d_spec_stored_as_string(self, tmp_path):
+        cfg, _, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        assert cfg.num_rounds_spec == "d"
+
+    def test_num_rounds_kd_spec(self, tmp_path):
+        yaml_str = _SURFACE_YAML.replace("  num_rounds: 5", "  num_rounds: '3*d'")
+        cfg, _, _ = _load_cfg_from_yaml(yaml_str, tmp_path)
+        assert cfg.num_rounds_spec == "3*d"
 
     def test_missing_distance_for_topological_raises(self, tmp_path):
         yaml_str = _SURFACE_YAML.replace("  distance: 5\n", "")
@@ -326,12 +366,39 @@ class TestConfigLoading:
 
 
 # ---------------------------------------------------------------------------
-# 4. Decoder resolution
+# 4. resolve_num_rounds
+# ---------------------------------------------------------------------------
+
+class TestResolveNumRounds:
+    def test_integer_spec(self):
+        from qec_decoder_sim.runner.circuit_builder import resolve_num_rounds
+        assert resolve_num_rounds("12", distance=5) == 12
+
+    def test_d_spec(self):
+        from qec_decoder_sim.runner.circuit_builder import resolve_num_rounds
+        assert resolve_num_rounds("d", distance=7) == 7
+
+    def test_kd_spec(self):
+        from qec_decoder_sim.runner.circuit_builder import resolve_num_rounds
+        assert resolve_num_rounds("3*d", distance=5) == 15
+
+    def test_dk_spec(self):
+        from qec_decoder_sim.runner.circuit_builder import resolve_num_rounds
+        assert resolve_num_rounds("d*4", distance=3) == 12
+
+    def test_invalid_spec_raises(self):
+        from qec_decoder_sim.runner.circuit_builder import resolve_num_rounds
+        with pytest.raises(ValueError):
+            resolve_num_rounds("foo", distance=5)
+
+
+# ---------------------------------------------------------------------------
+# 5. Decoder resolution
 # ---------------------------------------------------------------------------
 
 class TestDecoderResolution:
     def test_mwpm_no_correlated_uses_pymatching_builtin(self):
-        from qec_decoder_sim.decoder.sinter_registry import ResolvedDecoder, resolve_decoder
+        from qec_decoder_sim.decoder.sinter_registry import resolve_decoder
         from qec_decoder_sim.runner.config import DecoderVariant
 
         variant = DecoderVariant(alias="mwpm", decoder_type="mwpm", params={})
@@ -361,7 +428,6 @@ class TestDecoderResolution:
         from qec_decoder_sim.decoder.sinter_registry import resolve_decoder
         from qec_decoder_sim.runner.config import DecoderVariant
 
-        # Skip if chromobius is actually installed
         try:
             import chromobius  # type: ignore  # noqa: F401
             pytest.skip("chromobius is installed — import-error path not reachable")
@@ -374,7 +440,7 @@ class TestDecoderResolution:
 
 
 # ---------------------------------------------------------------------------
-# 5. Task building — surface code + MWPM
+# 6. Task building — surface code + MWPM
 # ---------------------------------------------------------------------------
 
 class TestTaskBuildingSurfaceMwpm:
@@ -386,10 +452,7 @@ class TestTaskBuildingSurfaceMwpm:
 
         assert len(tasks) == 1
         task = tasks[0]
-        # MWPM task must use sinter's built-in "pymatching"
         assert task.decoder == "pymatching"
-        # DEM must have been generated with decompose_errors=True — each component of every
-        # error instruction (split by ^ separators) must have at most 2 detector targets.
         dem = task.detector_error_model
         assert dem is not None
         for inst in dem.flattened():
@@ -401,27 +464,88 @@ class TestTaskBuildingSurfaceMwpm:
                     elif t.is_relative_detector_id():
                         components[-1].append(t)
                 for comp in components:
-                    assert len(comp) <= 2, (
-                        f"DEM component has {len(comp)} detectors after decomposition"
-                    )
+                    assert len(comp) <= 2
 
     def test_no_custom_decoder_registered_for_builtin_mwpm(self, tmp_path):
         cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_YAML, tmp_path)
         from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
 
         _, custom_decoders = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
-        # sinter's built-in "pymatching" must NOT appear in custom_decoders
         assert "pymatching" not in custom_decoders
         assert "mwpm" not in custom_decoders
 
 
 # ---------------------------------------------------------------------------
-# 6. Task building — xyz_decoding
+# 7. Distance sweep
+# ---------------------------------------------------------------------------
+
+class TestDistanceSweep:
+    def test_multi_distance_creates_correct_task_count(self, tmp_path):
+        """3 distances × 2 p_values × 1 decoder = 6 tasks."""
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        assert len(tasks) == 3 * 2 * 1  # distances × p_values × decoders
+
+    def test_each_task_has_correct_distance_in_metadata(self, tmp_path):
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        distances_in_meta = {t.json_metadata["distance"] for t in tasks}
+        assert distances_in_meta == {3, 5, 7}
+
+    def test_each_task_has_num_rounds_equal_to_distance(self, tmp_path):
+        """num_rounds_spec='d' → num_rounds in metadata equals distance for each task."""
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        for task in tasks:
+            meta = task.json_metadata
+            assert meta["num_rounds"] == meta["distance"]
+
+    def test_circuits_differ_across_distances(self, tmp_path):
+        """Circuits at different distances must differ in detector count."""
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        # Group by distance and verify detector counts differ
+        by_d: dict[int, int] = {}
+        for task in tasks:
+            d = task.json_metadata["distance"]
+            p = task.json_metadata["p"]
+            if p == cfg.p_values[0]:  # same p for fair comparison
+                by_d[d] = task.circuit.num_detectors
+        assert len(set(by_d.values())) == 3  # all three distinct
+
+    def test_metadata_contains_num_rounds_spec(self, tmp_path):
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        for task in tasks:
+            assert "num_rounds_spec" in task.json_metadata
+            assert task.json_metadata["num_rounds_spec"] == "d"
+
+    def test_single_distance_backward_compat(self, tmp_path):
+        """distance: 5 (single int) → distances=(5,) → 1 task."""
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        assert len(tasks) == 1
+        assert tasks[0].json_metadata["distance"] == 5
+
+
+# ---------------------------------------------------------------------------
+# 8. Task building — xyz_decoding
 # ---------------------------------------------------------------------------
 
 class TestTaskBuildingXyzDecoding:
     def test_xyz_decoding_false_removes_x_detectors_from_task(self, tmp_path):
-        """When xyz_decoding=False and decoder is BP, task circuit has no X detectors."""
         from qec_decoder_sim.utils.dem_utils import CHROMOBIUS_COORD_BASIS_MAP
 
         cfg, variants, _ = _load_cfg_from_yaml(_MIDOUT_YAML, tmp_path)
@@ -445,31 +569,22 @@ class TestTaskBuildingXyzDecoding:
         from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
         tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
 
-        # Circuit in task should equal the full unfiltered circuit
-        from qec_decoder_sim.runner.circuit_builder import build_circuit
-        base_circuit = build_circuit(cfg=cfg, p=cfg.p_values[0], circuit_seed=None)
+        base_circuit = _build_circuit_from_cfg(cfg)
         assert tasks[0].circuit.num_detectors == base_circuit.num_detectors
 
     def test_mwpm_not_affected_by_xyz_decoding_false(self, tmp_path):
-        """MWPM is not a BP decoder — xyz_decoding=False should not filter its circuit."""
-        yaml_str = _SURFACE_YAML.replace(
-            "  decoders: [mwpm]", "  decoders: [mwpm]"
-        )
-        yaml_str = yaml_str.rstrip() + "\n  xyz_decoding: false\n"
+        yaml_str = _SURFACE_YAML.rstrip() + "\n  xyz_decoding: false\n"
         cfg, variants, _ = _load_cfg_from_yaml(yaml_str, tmp_path)
 
-        from qec_decoder_sim.runner.circuit_builder import build_circuit
         from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
-
         tasks, _ = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
-        base_circuit = build_circuit(cfg=cfg, p=cfg.p_values[0], circuit_seed=None)
+        base_circuit = _build_circuit_from_cfg(cfg)
 
-        # MWPM circuit should NOT be filtered
         assert tasks[0].circuit.num_detectors == base_circuit.num_detectors
 
 
 # ---------------------------------------------------------------------------
-# 7. BB code backward compatibility
+# 9. BB code backward compatibility
 # ---------------------------------------------------------------------------
 
 class TestBBBackwardCompatibility:
@@ -480,8 +595,7 @@ class TestBBBackwardCompatibility:
 
     def test_bb_circuit_builds_correctly(self, tmp_path):
         cfg, _, _ = _load_cfg_from_yaml(_BB_YAML, tmp_path)
-        from qec_decoder_sim.runner.circuit_builder import build_circuit
-        circuit = build_circuit(cfg=cfg, p=0.001, circuit_seed=None)
+        circuit = _build_circuit_from_cfg(cfg)
         assert isinstance(circuit, stim.Circuit)
         assert circuit.num_detectors > 0
 
@@ -492,10 +606,7 @@ class TestBBBackwardCompatibility:
         )
         cfg, _, _ = _load_cfg_from_yaml(yaml_str, tmp_path)
         assert cfg.ibm_reproduce is True
-
-        from qec_decoder_sim.runner.circuit_builder import build_circuit
-        # Should not raise
-        circuit = build_circuit(cfg=cfg, p=0.001, circuit_seed=None)
+        circuit = _build_circuit_from_cfg(cfg)
         assert circuit.num_detectors > 0
 
     def test_bb_use_both_forwarded(self, tmp_path):
@@ -505,9 +616,7 @@ class TestBBBackwardCompatibility:
         )
         cfg, _, _ = _load_cfg_from_yaml(yaml_str, tmp_path)
         assert cfg.use_both is True
-
-        from qec_decoder_sim.runner.circuit_builder import build_circuit
-        circuit = build_circuit(cfg=cfg, p=0.001, circuit_seed=None)
+        circuit = _build_circuit_from_cfg(cfg)
         assert circuit.num_detectors > 0
 
     def test_bb_metadata_contains_expected_keys(self, tmp_path):
@@ -519,6 +628,8 @@ class TestBBBackwardCompatibility:
         assert "m" in meta
         assert "a_x_pows" in meta
         assert "circuit_type" in meta
+        assert "num_rounds" in meta
+        assert "num_rounds_spec" in meta
 
     def test_topological_metadata_contains_distance(self, tmp_path):
         cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_YAML, tmp_path)
@@ -528,23 +639,23 @@ class TestBBBackwardCompatibility:
         assert "distance" in meta
         assert "l" not in meta
 
+    def test_bb_distances_is_none(self, tmp_path):
+        cfg, _, _ = _load_cfg_from_yaml(_BB_YAML, tmp_path)
+        assert cfg.distances is None
+
 
 # ---------------------------------------------------------------------------
-# 8. Sinter integration smoke test
+# 10. Sinter integration smoke tests
 # ---------------------------------------------------------------------------
 
 class TestSinterSmoke:
-    """Light end-to-end sinter.collect() runs with tiny shot counts."""
-
     def test_surface_code_mwpm_collects(self, tmp_path):
-        """sinter.collect() completes for surface_code_Z + pymatching."""
         import sinter
 
         cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_YAML, tmp_path)
         from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
 
         tasks, custom_decoders = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
-        # Replace shot count with tiny value for speed
         tasks = [
             sinter.Task(
                 circuit=t.circuit,
@@ -564,7 +675,6 @@ class TestSinterSmoke:
         assert len(results) == len(tasks)
 
     def test_midout_bplsd_xyz_decoding_false_collects(self, tmp_path):
-        """sinter.collect() completes for midout_color_code_Z + bplsd + xyz_decoding=False."""
         import sinter
 
         cfg, variants, _ = _load_cfg_from_yaml(_MIDOUT_YAML, tmp_path)
@@ -588,3 +698,31 @@ class TestSinterSmoke:
             print_progress=False,
         )
         assert len(results) == len(tasks)
+
+    def test_multi_distance_surface_code_mwpm_collects(self, tmp_path):
+        """Distance sweep with MWPM: 3 distances × 2 p_values = 6 tasks, all collected."""
+        import sinter
+
+        cfg, variants, _ = _load_cfg_from_yaml(_SURFACE_MULTI_D_YAML, tmp_path)
+        from qec_decoder_sim.runner.task_genertor import build_tasks_and_decoders
+
+        tasks, custom_decoders = build_tasks_and_decoders(cfg=cfg, decoder_variants=variants)
+        assert len(tasks) == 6
+
+        tasks = [
+            sinter.Task(
+                circuit=t.circuit,
+                detector_error_model=t.detector_error_model,
+                decoder=t.decoder,
+                json_metadata=t.json_metadata,
+                collection_options=sinter.CollectionOptions(max_shots=10),
+            )
+            for t in tasks
+        ]
+        results = sinter.collect(
+            tasks=tasks,
+            custom_decoders=custom_decoders,
+            num_workers=1,
+            print_progress=False,
+        )
+        assert len(results) == 6
