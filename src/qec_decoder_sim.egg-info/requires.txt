@@ -19,3 +19,4 @@ matplotlib
 pymatching
 ldpc
 beliefmatching
+chromobius
