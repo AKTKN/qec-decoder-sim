@@ -110,7 +110,7 @@ def _make_phenom_topological_circuit(
     if style_key == "surface_code_Z":
         from clorco.surface_code._surface_code_layouts import make_surface_code_layout  # type: ignore
         from clorco.surface_code._keyed_constructions import f2c  # type: ignore
-        code = make_surface_code_layout(width=diameter, height=diameter)
+        code = make_surface_code_layout(width=diameter, height=diameter).z_basis_subset()
         return code.make_phenom_circuit(noise=noise, rounds=rounds, extra_coords_func=f2c)
 
     if style_key in {"superdense_color_code_Z", "midout_color_code_Z"}:
@@ -121,7 +121,7 @@ def _make_phenom_topological_circuit(
             coord_style="rect",
             single_rgb_layer_instead_of_actual_code=False,
             spurs="smooth",
-        )
+        ).z_basis_subset()
         return code.make_phenom_circuit(noise=noise, rounds=rounds, extra_coords_func=color_f2c)
 
     raise ValueError(f"Unsupported style for phenomenological noise model: {style_key!r}")

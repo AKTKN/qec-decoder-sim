@@ -487,6 +487,7 @@ def build_bb_phenom_stim_circuit(
     for round_index in range(num_rounds):
         _append_round_phenom(circuit, **round_args, repeat=round_index > 0, round_index=round_index)
 
+    circuit.append("DEPOLARIZE1", list(data_qubits), [p])
     for i in range(n):
         circuit.append("M" if z_basis else "MX", [l_data_offset + i])
 
