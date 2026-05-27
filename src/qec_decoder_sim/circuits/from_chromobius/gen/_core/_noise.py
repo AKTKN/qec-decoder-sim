@@ -146,7 +146,7 @@ class NoiseModel:
             idle_depolarization=p / 10,
             additional_depolarization_waiting_for_m_or_r=2 * p,
             any_clifford_1q_rule=NoiseRule(after={"DEPOLARIZE1": p / 10}),
-            any_clifford_2q_rule=NoiseRule(after={"DEPOLARIZE2": p}),
+            any_clifford_2q_rule=NoiseRule(after={"DEPOLARIZE2": p }),
             measure_rules={
                 "Z": NoiseRule(after={"DEPOLARIZE1": p}, flip_result=p * 5),
                 "ZZ": NoiseRule(after={"DEPOLARIZE2": p}, flip_result=p * 5),

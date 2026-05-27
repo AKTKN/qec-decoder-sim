@@ -131,4 +131,6 @@ def _build_decoder_variant_summary(variants: dict[str, DecoderVariant]) -> dict[
 
 def _experiment_dir_name(cfg: ExperimentConfig, started_at: datetime) -> str:
 	ts = started_at.strftime("%Y%m%d-%H%M%S")
-	return f"memory_bb_l{cfg.l}_m{cfg.m}_{cfg.basis}_{ts}"
+	code = str(cfg.circuit_type)
+	noisemodel = str(cfg.noise_model)
+	return f"code={code},noisemodel={noisemodel},date={ts}"
