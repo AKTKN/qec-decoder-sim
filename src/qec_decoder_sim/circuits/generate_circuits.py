@@ -141,6 +141,8 @@ def _write_circuit(
     )
     if job.code == "bivariate_bicycle_code_Z":
         stem += f",use_both={job.use_both}"
+        if job.ibm_reproduce:
+            stem += ",ibm_reproduce=True"
     path = out_dir / f"{stem}.stim"
     with open(path, "w", encoding="utf-8") as handle:
         print(circuit, file=handle)
