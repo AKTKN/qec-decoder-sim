@@ -591,8 +591,26 @@ def build_bb_ibm_noisy_stim_circuit(
         p=p,
     )
 
-    for round_index in range(num_rounds):
-        _append_round_ibm(circuit, **round_args, repeat=round_index > 0, round_index=round_index)
+    # --- Original implementation (explicit unroll) ---
+    # Kept here for reference; see comment below for why this was replaced.
+    #
+    # for round_index in range(num_rounds):
+    #     _append_round_ibm(circuit, **round_args, repeat=round_index > 0, round_index=round_index)
+
+    # --- Current implementation (stim REPEAT block) ---
+    # Using a REPEAT block instead of explicit unrolling so that stim keeps
+    # independent error mechanisms from different gates separate in the DEM.
+    # With explicit unrolling, stim merges error mechanisms that share the same
+    # detector pattern, producing a coarser factor-graph (~1584 fewer variable
+    # nodes for d=12) which degrades BP decoding performance.
+    # SHIFT_COORDS(0, 1, 0) at the end of the body increments the round
+    # coordinate so DETECTOR visualisation remains correct across iterations.
+    _append_round_ibm(circuit, **round_args, repeat=False, round_index=0)
+    if num_rounds > 1:
+        rep_body = stim.Circuit()
+        _append_round_ibm(rep_body, **round_args, repeat=True, round_index=0)
+        rep_body.append("SHIFT_COORDS", [], [0.0, 1.0, 0.0])
+        circuit += (num_rounds - 1) * rep_body
 
     for i in range(n):
         circuit.append("M" if z_basis else "MX", [l_data_offset + i])
