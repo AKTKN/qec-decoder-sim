@@ -18,7 +18,7 @@ def _ensure_src_on_path() -> Path:
 def main() -> None:
     repo_root = _ensure_src_on_path()
 
-    parser = argparse.ArgumentParser(description="Run a bivariate bicycle memory experiment via sinter.")
+    parser = argparse.ArgumentParser(description="Run memory experiment via sinter.")
     parser.add_argument("--config", type=Path, default=None, help="Path to YAML config file")
     args = parser.parse_args()
 
