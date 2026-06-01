@@ -47,7 +47,10 @@ experiment:
   detector_seed_base: 4
   print_progress: true
 
-  xyz_decoding: true
+  # Convention: use_both=true requires xyz_decoding=false.
+  #   use_both: true  → xyz_decoding: false  (filter X detectors; BP uses primary-basis check matrix only)
+  #   use_both: false → xyz_decoding: false  (no X detectors in circuit anyway; filter is a no-op)
+  xyz_decoding: false
   use_both: false
 
   decoders:
