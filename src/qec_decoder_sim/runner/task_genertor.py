@@ -7,7 +7,7 @@ import stim
 
 from qec_decoder_sim.decoder.sinter_registry import BP_DECODER_TYPES, resolve_decoder
 from qec_decoder_sim.runner.circuit_builder import build_circuit, resolve_num_rounds
-from qec_decoder_sim.runner.config import BB_CIRCUIT_TYPE, DecoderVariant, ExperimentConfig
+from qec_decoder_sim.runner.config import BB_CIRCUIT_TYPE, HGP_CIRCUIT_TYPE, DecoderVariant, ExperimentConfig
 from qec_decoder_sim.utils.dem_utils import filter_circuit_by_basis
 
 
@@ -125,10 +125,14 @@ def _distance_sweep(cfg: ExperimentConfig) -> list[int | None]:
     """Return the list of distance values to iterate over.
 
     For BB codes there is no distance axis, so returns ``[None]``.
+    For HGP codes the distance is computed from the PCM and stored in config.
     For topological codes returns the distances tuple from the config.
     """
     if cfg.circuit_type == BB_CIRCUIT_TYPE:
         return [None]
+    if cfg.circuit_type == HGP_CIRCUIT_TYPE:
+        assert cfg.hgp_computed_distance is not None
+        return [cfg.hgp_computed_distance]
     assert cfg.distances is not None
     return list(cfg.distances)
 
@@ -182,6 +186,15 @@ def _build_task_metadata(
                 "b_x_pows": list(cfg.b_x_pows),  # type: ignore[arg-type]
                 "b_y_pows": list(cfg.b_y_pows),  # type: ignore[arg-type]
                 "ibm_reproduce": cfg.ibm_reproduce,
+                "use_both": cfg.use_both,
+            }
+        )
+    elif cfg.circuit_type == HGP_CIRCUIT_TYPE:
+        meta.update(
+            {
+                "distance": distance,
+                "hgp_pcm_path": cfg.hgp_pcm_path,
+                "hgp_build_graph_seed": cfg.hgp_build_graph_seed,
                 "use_both": cfg.use_both,
             }
         )

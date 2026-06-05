@@ -1,0 +1,30 @@
+runtime:
+  write_plots: false
+
+output:
+  output_root: results/memory_run_hgp
+
+experiment:
+  circuit: hgp_code_Z
+  pcm_path: scripts_shell/hgp_checkmatrix/example.txt
+  build_graph_seed: 22
+  # distance: 3   # optional reference; if provided must match computed distance
+  shots: 10000
+  p_values: [0.01, 0.02, 0.03]
+  basis: z
+  num_rounds: d
+  noise_mode: theoretical
+  noise_model: uniform
+  processes: 6
+  print_progress: true
+  decoders:
+    - bplsd
+
+
+decoder_params:
+  bplsd:
+    max_iter: 20
+    bp_method: ms
+    ms_scaling_factor: 0.625
+    lsd_order: 0
+    schedule: parallel

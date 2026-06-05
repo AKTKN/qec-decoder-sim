@@ -443,7 +443,7 @@ class StabilizerCode:
         extra_coords_func: Callable[['gen.Flow'], Iterable[float]] = lambda _: (),
     ) -> stim.Circuit:
         if isinstance(noise, (int, float)):
-            noise = NoiseRule(after={"DEPOLARIZE1": noise}, flip_result=noise)
+            noise = NoiseRule(after={"X_ERROR": noise}, flip_result=noise)
         chunk1 = self.mpp_chunk(noise=NoiseRule(after=noise.after), flow_style='init', resolve_anticommutations=True)
         chunk2 = self.mpp_chunk(noise=noise, resolve_anticommutations=True)
         chunk3 = self.mpp_chunk(noise=NoiseRule(before=noise.before), flow_style='end', resolve_anticommutations=True)

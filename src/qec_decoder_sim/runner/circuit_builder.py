@@ -12,6 +12,7 @@ import stim
 
 from qec_decoder_sim.circuits import BivariateBicycleCode
 from qec_decoder_sim.circuits._topological_memory_circuits import make_topological_memory_circuit
+from qec_decoder_sim.circuits.hgpcode import build_hgp_stim_circuit, load_pcm
 from qec_decoder_sim.codes.code_factory import BBCodeSpec
 from qec_decoder_sim.noise.noise_model import (
     NoiseParameters,
@@ -19,7 +20,7 @@ from qec_decoder_sim.noise.noise_model import (
     si1000_circuit_level,
     uniform_circuit_level,
 )
-from qec_decoder_sim.runner.config import BB_CIRCUIT_TYPE, ExperimentConfig
+from qec_decoder_sim.runner.config import BB_CIRCUIT_TYPE, HGP_CIRCUIT_TYPE, ExperimentConfig
 
 _NOISE_MODEL_ALIASES: dict[str, str] = {
     "uniform": "uniform-cln",
@@ -87,9 +88,10 @@ def build_circuit(
     """
     if cfg.circuit_type == BB_CIRCUIT_TYPE:
         return _build_bb_circuit(cfg, p, circuit_seed, num_rounds=num_rounds)
-    else:
-        assert distance is not None
-        return _build_topological_circuit(cfg, p, distance=distance, num_rounds=num_rounds)
+    if cfg.circuit_type == HGP_CIRCUIT_TYPE:
+        return _build_hgp_circuit(cfg, p, num_rounds=num_rounds)
+    assert distance is not None
+    return _build_topological_circuit(cfg, p, distance=distance, num_rounds=num_rounds)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +184,34 @@ def _build_topological_circuit(
         diameter=distance,
         noise_model=topo_noise,
         noise_strength=p,
+    )
+
+
+# ---------------------------------------------------------------------------
+# HGP code path
+# ---------------------------------------------------------------------------
+
+def _build_hgp_circuit(
+    cfg: ExperimentConfig,
+    p: float,
+    *,
+    num_rounds: int,
+) -> stim.Circuit:
+    noise_key = _resolve_noise_model(cfg.noise_model)
+    if noise_key != "uniform-cln":
+        raise ValueError(
+            "hgp_code_Z only supports noise_model='uniform'; "
+            f"got {cfg.noise_model!r}"
+        )
+    assert cfg.hgp_pcm_path is not None
+    h = load_pcm(cfg.hgp_pcm_path)
+    return build_hgp_stim_circuit(
+        h,
+        basis=cfg.basis,
+        num_rounds=num_rounds,
+        p=p,
+        use_both=cfg.use_both,
+        build_graph_seed=cfg.hgp_build_graph_seed if cfg.hgp_build_graph_seed is not None else 22,
     )
 
 

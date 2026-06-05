@@ -347,11 +347,11 @@ def _append_round_phenom(
 ) -> None:
     """One syndrome extraction round with phenomenological noise.
 
-    DEPOLARIZE1(p) is applied to all data qubits at the start of the round.
+    X_ERROR(p) is applied to all data qubits at the start of the round.
     X_ERROR(p) / Z_ERROR(p) is inserted immediately before each ancilla
     measurement to model imperfect syndrome readout.
     """
-    circuit.append("DEPOLARIZE1", list(data_qubits), [p])
+    circuit.append("X_ERROR", list(data_qubits), [p])
 
     if not repeat:
         for i in range(n // 2):
@@ -422,7 +422,7 @@ def build_bb_phenom_stim_circuit(
     """Build a BB circuit under the phenomenological noise model.
 
     Each syndrome extraction round receives:
-    - DEPOLARIZE1(p) on all data qubits (idle error during the round)
+    - X_ERROR(p) on all data qubits (idle error during the round)
     - X_ERROR(p) before Z-ancilla measurements (MR)
     - Z_ERROR(p) before X-ancilla measurements (MRX), or X_ERROR(p) after H
       when hzh=True
@@ -487,7 +487,7 @@ def build_bb_phenom_stim_circuit(
     for round_index in range(num_rounds):
         _append_round_phenom(circuit, **round_args, repeat=round_index > 0, round_index=round_index)
 
-    circuit.append("DEPOLARIZE1", list(data_qubits), [p])
+    circuit.append("X_ERROR", list(data_qubits), [p])
     for i in range(n):
         circuit.append("M" if z_basis else "MX", [l_data_offset + i])
 

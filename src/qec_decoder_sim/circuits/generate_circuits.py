@@ -9,6 +9,7 @@ import stim
 
 from qec_decoder_sim.circuits import BivariateBicycleCode
 from qec_decoder_sim.circuits._topological_memory_circuits import make_topological_memory_circuit
+from qec_decoder_sim.circuits.hgpcode import build_hgp_stim_circuit, compute_hgp_distance, load_pcm
 from qec_decoder_sim.codes.code_factory import BBCodeSpec
 
 _SUPPORTED_CODES = {
@@ -16,6 +17,7 @@ _SUPPORTED_CODES = {
     "superdense_color_code_Z",
     "midout_color_code_Z",
     "bivariate_bicycle_code_Z",
+    "hgp_code_Z",
 }
 
 _NOISE_MODEL_ALIASES = {
@@ -36,6 +38,8 @@ class CircuitJob:
     noise_strength: float
     use_both: bool = False
     ibm_reproduce: bool = False
+    pcm_path: str | None = None
+    build_graph_seed: int = 22
 
 
 def _parse_int_list(raw: str) -> tuple[int, ...]:
@@ -120,6 +124,25 @@ def _build_topological_circuit(*, job: CircuitJob) -> stim.Circuit:
     )
 
 
+def _build_hgp_circuit(*, job: CircuitJob) -> stim.Circuit:
+    if _resolve_noise_model(job.noise_model_raw) != "uniform-cln":
+        raise ValueError(
+            "hgp_code_Z only supports noise_model='uniform'; "
+            f"got {job.noise_model_raw!r}"
+        )
+    assert job.pcm_path is not None, "pcm_path must be set for hgp_code_Z"
+    rounds = _parse_rounds(job.rounds_spec, distance=job.distance)
+    h = load_pcm(job.pcm_path)
+    return build_hgp_stim_circuit(
+        h,
+        basis=_basis_from_code(job.code),
+        num_rounds=rounds,
+        p=job.noise_strength,
+        use_both=job.use_both,
+        build_graph_seed=job.build_graph_seed,
+    )
+
+
 def _write_circuit(
     *,
     circuit: stim.Circuit,
@@ -135,14 +158,23 @@ def _write_circuit(
     if noise_tag == "phenomenological" and code_name in {"superdense_color_code_Z", "midout_color_code_Z"}:
         code_name = "color_code_Z"
 
-    stem = (
-        f"code={code_name},d={job.distance},rounds={rounds},"
-        f"noisemodel={noise_tag},p={job.noise_strength}"
-    )
-    if job.code == "bivariate_bicycle_code_Z":
-        stem += f",use_both={job.use_both}"
-        if job.ibm_reproduce:
-            stem += ",ibm_reproduce=True"
+    if job.code == "hgp_code_Z":
+        assert job.pcm_path is not None
+        pcm_stem = pathlib.Path(job.pcm_path).stem
+        stem = (
+            f"code={code_name},pcm={pcm_stem},d={job.distance},rounds={rounds},"
+            f"noisemodel={noise_tag},p={job.noise_strength},use_both={job.use_both}"
+        )
+    else:
+        stem = (
+            f"code={code_name},d={job.distance},rounds={rounds},"
+            f"noisemodel={noise_tag},p={job.noise_strength}"
+        )
+        if job.code == "bivariate_bicycle_code_Z":
+            stem += f",use_both={job.use_both}"
+            if job.ibm_reproduce:
+                stem += ",ibm_reproduce=True"
+
     path = out_dir / f"{stem}.stim"
     with open(path, "w", encoding="utf-8") as handle:
         print(circuit, file=handle)
@@ -167,6 +199,8 @@ def _build_jobs(args: argparse.Namespace) -> list[CircuitJob]:
                 noise_strength=float(noise_strength),
                 use_both=args.use_both,
                 ibm_reproduce=args.ibm_reproduce,
+                pcm_path=getattr(args, "pcm_path", None),
+                build_graph_seed=getattr(args, "build_graph_seed", 22),
             )
         )
     return jobs
@@ -176,6 +210,27 @@ def _validate_args(args: argparse.Namespace) -> None:
     unknown_codes = sorted(set(args.code) - _SUPPORTED_CODES)
     if unknown_codes:
         raise ValueError(f"Unknown codes: {unknown_codes}")
+
+    has_hgp = "hgp_code_Z" in args.code
+    has_non_hgp = bool(set(args.code) - {"hgp_code_Z"})
+
+    if has_non_hgp and len(args.distance) < 1:
+        raise ValueError(
+            "--distance is required for non-hgp codes (provide at least one value)"
+        )
+
+    if has_hgp:
+        if not args.pcm_path:
+            raise ValueError("hgp_code_Z requires --pcm_path")
+        if len(args.distance) > 1:
+            raise ValueError(
+                "hgp_code_Z accepts at most one --distance value (optional reference)"
+            )
+        non_uniform = [nm for nm in args.noise_model if nm not in {"uniform", "uniform-cln"}]
+        if non_uniform:
+            raise ValueError(
+                f"hgp_code_Z only supports --noise_model uniform; got {non_uniform}"
+            )
 
     if "bivariate_bicycle_code_Z" in args.code:
         missing = [
@@ -200,7 +255,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate stim circuits for QEC simulation.")
     parser.add_argument("--out_dir", type=str, required=True)
     parser.add_argument("--code", nargs="+", required=True, choices=sorted(_SUPPORTED_CODES))
-    parser.add_argument("--distance", nargs="+", required=True, type=int)
+    parser.add_argument("--distance", nargs="*", required=False, default=[], type=int)
     parser.add_argument("--rounds", nargs="+", required=True, type=str)
     parser.add_argument("--noise_model", nargs="+", required=True, choices=sorted(_NOISE_MODEL_ALIASES.keys()))
     parser.add_argument("--noise_strength", nargs="+", required=True, type=float)
@@ -215,12 +270,31 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--use_both", action="store_true", default=False)
     parser.add_argument("--ibm_reproduce", action="store_true", default=False)
 
+    # HGP-specific arguments
+    parser.add_argument("--pcm_path", type=str, default=None,
+                        help="Path to the parity-check matrix file (required for hgp_code_Z)")
+    parser.add_argument("--build_graph_seed", type=int, default=22,
+                        help="Seed for cardinal edge orientation (hgp_code_Z only)")
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     _validate_args(args)
+
+    # For HGP codes: compute the actual distance, validate against reference if provided.
+    if "hgp_code_Z" in args.code:
+        h = load_pcm(args.pcm_path)
+        computed_distance = compute_hgp_distance(h)
+        if args.distance:
+            ref = args.distance[0]
+            if ref != computed_distance:
+                raise ValueError(
+                    f"Provided --distance {ref} does not match computed code distance "
+                    f"{computed_distance} for PCM {args.pcm_path!r}."
+                )
+        args.distance = [computed_distance]
 
     jobs = _build_jobs(args)
     if args.stdout and len(jobs) != 1:
@@ -244,6 +318,8 @@ def main() -> None:
         if job.code == "bivariate_bicycle_code_Z":
             assert bb_spec is not None
             circuit = _build_bb_circuit(job=job, bb_spec=bb_spec)
+        elif job.code == "hgp_code_Z":
+            circuit = _build_hgp_circuit(job=job)
         elif job.code in {"surface_code_Z", "superdense_color_code_Z", "midout_color_code_Z"}:
             circuit = _build_topological_circuit(job=job)
         else:

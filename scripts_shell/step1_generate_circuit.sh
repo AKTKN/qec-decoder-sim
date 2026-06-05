@@ -22,23 +22,33 @@ export PYTHONPATH="$ROOT_DIR/src"
 # 	--out_dir generated_circuits/midout_color \
 # 	--noise_model uniform \
 # 	--rounds "d" \
-# 	--distance 5 7 9 11 \
-# 	--noise_strength 0.001 0.002 0.003 0.005
+# 	--distance 5 7 \
+# 	--noise_strength 0.000001
 
-# bivariate_bicycle_code_Z (example parameters)
+# hgp_code_Z (example: example.txt PCM, build_graph_seed=22)
 "$PYTHON_BIN" -m qec_decoder_sim.circuits.generate_circuits \
-	--code bivariate_bicycle_code_Z \
-	--out_dir generated_circuits/bivariate_bicycle \
+	--code hgp_code_Z \
+	--pcm_path scripts_shell/hgp_checkmatrix/example.txt \
+	--build_graph_seed 22 \
+	--out_dir generated_circuits/hgp \
 	--noise_model uniform \
-	--rounds "d" \
-	--distance 12 \
-	--noise_strength 0.002 \
-	--l 12 --m 6 \
-	--a_x_pows 3 \
-	--a_y_pows 1,2 \
-	--b_x_pows 1,2 \
-	--b_y_pows 3 \
-	--ibm_reproduce \
+	--rounds d \
+	--noise_strength 0.001 \
+
+# # bivariate_bicycle_code_Z (example parameters)
+# "$PYTHON_BIN" -m qec_decoder_sim.circuits.generate_circuits \
+# 	--code bivariate_bicycle_code_Z \
+# 	--out_dir generated_circuits/bivariate_bicycle \
+# 	--noise_model phenomenological \
+# 	--rounds "d" \
+# 	--distance 12 \
+# 	--noise_strength 0.015 0.02 0.03\
+# 	--l 6 --m 6 \
+# 	--a_x_pows 3 \
+# 	--a_y_pows 1,2 \
+# 	--b_x_pows 1,2 \
+# 	--b_y_pows 3 \
+# 	# --ibm_reproduce \
 
 
 # =====  BB code params list =====

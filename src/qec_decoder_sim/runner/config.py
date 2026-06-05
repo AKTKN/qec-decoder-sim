@@ -13,6 +13,7 @@ TOPOLOGICAL_CIRCUIT_TYPES: frozenset[str] = frozenset(
 )
 
 BB_CIRCUIT_TYPE = "bivariate_bicycle_code_Z"
+HGP_CIRCUIT_TYPE = "hgp_code_Z"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,14 @@ class ExperimentConfig:
     b_y_pows: tuple[int, ...] | None
     ibm_reproduce: bool
     use_both: bool
+
+    # --- HGP code parameters (required when circuit_type == HGP_CIRCUIT_TYPE) ---
+    hgp_pcm_path: str | None
+    """Path to the classical parity-check matrix file for HGP codes."""
+    hgp_build_graph_seed: int | None
+    """Seed for cardinal edge orientation; None means use default (22)."""
+    hgp_computed_distance: int | None
+    """Quantum code distance computed from hgp_pcm_path at config load time."""
 
     # --- rounds spec ---
     num_rounds_spec: str
@@ -152,6 +161,38 @@ def load_config(
     b_x_pows = _parse_pow_tuple_optional(experiment.get("b_x_pows"))
     b_y_pows = _parse_pow_tuple_optional(experiment.get("b_y_pows"))
 
+    # HGP-specific fields (optional — only required for HGP codes)
+    hgp_pcm_path_raw = experiment.get("pcm_path")
+    hgp_pcm_path: str | None = None
+    if hgp_pcm_path_raw is not None:
+        raw_path = Path(str(hgp_pcm_path_raw))
+        hgp_pcm_path = str(raw_path if raw_path.is_absolute() else repo_root / raw_path)
+    hgp_build_graph_seed_raw = experiment.get("build_graph_seed")
+    hgp_build_graph_seed: int | None = (
+        int(hgp_build_graph_seed_raw) if hgp_build_graph_seed_raw is not None else None
+    )
+    # Distance computation for HGP codes (done early so it can be stored in config)
+    hgp_computed_distance: int | None = None
+    if circuit_type == HGP_CIRCUIT_TYPE:
+        if hgp_pcm_path is None:
+            raise ValueError("experiment.pcm_path is required for hgp_code_Z")
+        from qec_decoder_sim.circuits.hgpcode import compute_hgp_distance, load_pcm
+        _h = load_pcm(hgp_pcm_path)
+        hgp_computed_distance = compute_hgp_distance(_h)
+        # Validate against reference distance if provided
+        _ref_distances = _parse_distances(experiment.get("distance"))
+        if _ref_distances is not None:
+            if len(_ref_distances) != 1:
+                raise ValueError(
+                    "experiment.distance for hgp_code_Z must be a single reference value"
+                )
+            ref_d = _ref_distances[0]
+            if ref_d != hgp_computed_distance:
+                raise ValueError(
+                    f"experiment.distance={ref_d} does not match computed HGP code "
+                    f"distance {hgp_computed_distance} for PCM {hgp_pcm_path!r}."
+                )
+
     cfg = ExperimentConfig(
         shots_by_p=shots_by_p,
         p_values=p_values,
@@ -167,6 +208,9 @@ def load_config(
         b_y_pows=b_y_pows,
         ibm_reproduce=ibm_reproduce,
         use_both=use_both,
+        hgp_pcm_path=hgp_pcm_path,
+        hgp_build_graph_seed=hgp_build_graph_seed,
+        hgp_computed_distance=hgp_computed_distance,
         noise_mode=str(noise_mode).lower(),
         noise_model=str(noise_model).lower(),
         num_circuit_samples=num_circuit_samples,
@@ -380,7 +424,7 @@ def _parse_noise_mode_and_model(experiment: dict[str, Any]) -> tuple[str, str]:
 
 
 def _validate_experiment_config(cfg: ExperimentConfig) -> None:
-    known_types = TOPOLOGICAL_CIRCUIT_TYPES | {BB_CIRCUIT_TYPE}
+    known_types = TOPOLOGICAL_CIRCUIT_TYPES | {BB_CIRCUIT_TYPE, HGP_CIRCUIT_TYPE}
     if cfg.circuit_type not in known_types:
         raise ValueError(
             f"experiment.circuit must be one of {sorted(known_types)}, "
@@ -389,6 +433,22 @@ def _validate_experiment_config(cfg: ExperimentConfig) -> None:
 
     if cfg.basis not in {"x", "z"}:
         raise ValueError("experiment.basis must be 'x' or 'z'")
+
+    if cfg.circuit_type == HGP_CIRCUIT_TYPE:
+        if not cfg.hgp_pcm_path:
+            raise ValueError("experiment.pcm_path is required for hgp_code_Z")
+        noise_key = cfg.noise_model.strip().lower()
+        if noise_key not in {"uniform", "uniform-cln"}:
+            raise ValueError(
+                "hgp_code_Z only supports noise_model='uniform'; "
+                f"got {cfg.noise_model!r}"
+            )
+        if cfg.noise_mode != "theoretical":
+            raise ValueError(
+                "hgp_code_Z only supports noise_mode='theoretical'"
+            )
+        _validate_num_rounds_spec(cfg.num_rounds_spec)
+        return
 
     if cfg.circuit_type == BB_CIRCUIT_TYPE:
         # BB-specific validation
