@@ -438,9 +438,9 @@ def _validate_experiment_config(cfg: ExperimentConfig) -> None:
         if not cfg.hgp_pcm_path:
             raise ValueError("experiment.pcm_path is required for hgp_code_Z")
         noise_key = cfg.noise_model.strip().lower()
-        if noise_key not in {"uniform", "uniform-cln"}:
+        if noise_key not in {"uniform", "uniform-cln", "phenomenological"}:
             raise ValueError(
-                "hgp_code_Z only supports noise_model='uniform'; "
+                "hgp_code_Z supports noise_model='uniform' or 'phenomenological'; "
                 f"got {cfg.noise_model!r}"
             )
         if cfg.noise_mode != "theoretical":

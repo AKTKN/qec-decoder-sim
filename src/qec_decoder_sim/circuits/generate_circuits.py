@@ -9,7 +9,12 @@ import stim
 
 from qec_decoder_sim.circuits import BivariateBicycleCode
 from qec_decoder_sim.circuits._topological_memory_circuits import make_topological_memory_circuit
-from qec_decoder_sim.circuits.hgpcode import build_hgp_stim_circuit, compute_hgp_distance, load_pcm
+from qec_decoder_sim.circuits.hgpcode import (
+    build_hgp_phenomenological_circuit,
+    build_hgp_stim_circuit,
+    compute_hgp_distance,
+    load_pcm,
+)
 from qec_decoder_sim.codes.code_factory import BBCodeSpec
 
 _SUPPORTED_CODES = {
@@ -125,21 +130,33 @@ def _build_topological_circuit(*, job: CircuitJob) -> stim.Circuit:
 
 
 def _build_hgp_circuit(*, job: CircuitJob) -> stim.Circuit:
-    if _resolve_noise_model(job.noise_model_raw) != "uniform-cln":
-        raise ValueError(
-            "hgp_code_Z only supports noise_model='uniform'; "
-            f"got {job.noise_model_raw!r}"
-        )
+    noise_key = _resolve_noise_model(job.noise_model_raw)
     assert job.pcm_path is not None, "pcm_path must be set for hgp_code_Z"
     rounds = _parse_rounds(job.rounds_spec, distance=job.distance)
     h = load_pcm(job.pcm_path)
-    return build_hgp_stim_circuit(
-        h,
-        basis=_basis_from_code(job.code),
-        num_rounds=rounds,
-        p=job.noise_strength,
-        use_both=job.use_both,
-        build_graph_seed=job.build_graph_seed,
+    basis = _basis_from_code(job.code)
+
+    if noise_key == "uniform-cln":
+        return build_hgp_stim_circuit(
+            h,
+            basis=basis,
+            num_rounds=rounds,
+            p=job.noise_strength,
+            use_both=job.use_both,
+            build_graph_seed=job.build_graph_seed,
+        )
+    if noise_key == "phenomenological":
+        return build_hgp_phenomenological_circuit(
+            h,
+            basis=basis,
+            num_rounds=rounds,
+            p=job.noise_strength,
+            use_both=job.use_both,
+            build_graph_seed=job.build_graph_seed,
+        )
+    raise ValueError(
+        "hgp_code_Z supports noise_model='uniform' or 'phenomenological'; "
+        f"got {job.noise_model_raw!r}"
     )
 
 
@@ -226,10 +243,11 @@ def _validate_args(args: argparse.Namespace) -> None:
             raise ValueError(
                 "hgp_code_Z accepts at most one --distance value (optional reference)"
             )
-        non_uniform = [nm for nm in args.noise_model if nm not in {"uniform", "uniform-cln"}]
-        if non_uniform:
+        _hgp_supported = {"uniform", "uniform-cln", "phenomenological"}
+        non_supported = [nm for nm in args.noise_model if nm not in _hgp_supported]
+        if non_supported:
             raise ValueError(
-                f"hgp_code_Z only supports --noise_model uniform; got {non_uniform}"
+                f"hgp_code_Z only supports --noise_model uniform or phenomenological; got {non_supported}"
             )
 
     if "bivariate_bicycle_code_Z" in args.code:

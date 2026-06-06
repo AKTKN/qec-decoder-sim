@@ -12,7 +12,11 @@ import stim
 
 from qec_decoder_sim.circuits import BivariateBicycleCode
 from qec_decoder_sim.circuits._topological_memory_circuits import make_topological_memory_circuit
-from qec_decoder_sim.circuits.hgpcode import build_hgp_stim_circuit, load_pcm
+from qec_decoder_sim.circuits.hgpcode import (
+    build_hgp_phenomenological_circuit,
+    build_hgp_stim_circuit,
+    load_pcm,
+)
 from qec_decoder_sim.codes.code_factory import BBCodeSpec
 from qec_decoder_sim.noise.noise_model import (
     NoiseParameters,
@@ -198,20 +202,31 @@ def _build_hgp_circuit(
     num_rounds: int,
 ) -> stim.Circuit:
     noise_key = _resolve_noise_model(cfg.noise_model)
-    if noise_key != "uniform-cln":
-        raise ValueError(
-            "hgp_code_Z only supports noise_model='uniform'; "
-            f"got {cfg.noise_model!r}"
-        )
     assert cfg.hgp_pcm_path is not None
     h = load_pcm(cfg.hgp_pcm_path)
-    return build_hgp_stim_circuit(
-        h,
-        basis=cfg.basis,
-        num_rounds=num_rounds,
-        p=p,
-        use_both=cfg.use_both,
-        build_graph_seed=cfg.hgp_build_graph_seed if cfg.hgp_build_graph_seed is not None else 22,
+    seed = cfg.hgp_build_graph_seed if cfg.hgp_build_graph_seed is not None else 22
+
+    if noise_key == "uniform-cln":
+        return build_hgp_stim_circuit(
+            h,
+            basis=cfg.basis,
+            num_rounds=num_rounds,
+            p=p,
+            use_both=cfg.use_both,
+            build_graph_seed=seed,
+        )
+    if noise_key == "phenomenological":
+        return build_hgp_phenomenological_circuit(
+            h,
+            basis=cfg.basis,
+            num_rounds=num_rounds,
+            p=p,
+            use_both=cfg.use_both,
+            build_graph_seed=seed,
+        )
+    raise ValueError(
+        "hgp_code_Z supports noise_model='uniform' or 'phenomenological'; "
+        f"got {cfg.noise_model!r}"
     )
 
 

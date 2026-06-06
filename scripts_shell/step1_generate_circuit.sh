@@ -31,9 +31,9 @@ export PYTHONPATH="$ROOT_DIR/src"
 	--pcm_path scripts_shell/hgp_checkmatrix/example.txt \
 	--build_graph_seed 22 \
 	--out_dir generated_circuits/hgp \
-	--noise_model uniform \
+	--noise_model phenomenological \
 	--rounds d \
-	--noise_strength 0.001 \
+	--noise_strength 0.01 \
 
 # # bivariate_bicycle_code_Z (example parameters)
 # "$PYTHON_BIN" -m qec_decoder_sim.circuits.generate_circuits \
