@@ -27,6 +27,7 @@ full = [
   "pandas",
   "pyarrow",
   "matplotlib",
+  "statsmodels",
   "pymatching",
   "ldpc",
   "beliefmatching",
@@ -49,4 +50,3 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-

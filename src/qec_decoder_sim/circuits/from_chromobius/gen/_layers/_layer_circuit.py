@@ -122,6 +122,16 @@ class LayerCircuit:
             layer.swap_layer.targets1.append(targets[k].value)
             layer.swap_layer.targets2.append(targets[k + 1].value)
 
+    def _feed_czswap(self, targets: list[stim.GateTarget]):
+        layer = self._feed(InteractSwapLayer)
+        for k in range(0, len(targets), 2):
+            layer.i_layer.targets1.append(targets[k].value)
+            layer.i_layer.targets2.append(targets[k + 1].value)
+            layer.i_layer.bases1.append("Z")
+            layer.i_layer.bases2.append("Z")
+            layer.swap_layer.targets1.append(targets[k].value)
+            layer.swap_layer.targets2.append(targets[k + 1].value)
+
     def _feed_iswap(self, targets: list[stim.GateTarget]):
         layer = self._feed(ISwapLayer)
         for k in range(0, len(targets), 2):
@@ -251,6 +261,8 @@ class LayerCircuit:
                 result._feed_swap(instruction.targets_copy())
             elif instruction.name == "CXSWAP":
                 result._feed_cxswap(instruction.targets_copy())
+            elif instruction.name == "CZSWAP":
+                result._feed_czswap(instruction.targets_copy())
             elif instruction.name == "SWAPCX":
                 result._feed_swapcx(instruction.targets_copy())
 

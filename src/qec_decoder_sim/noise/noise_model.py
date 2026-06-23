@@ -43,6 +43,88 @@ def si1000_circuit_level(p: float) -> NoiseParameters:
     )
 
 
+ABSTRACT_1Q_GATE_DECOMPOSITIONS: dict[str, tuple[str, ...]] = {
+    "C_XYZ": ("SQRT_X", "S"),
+    "C_ZYX": ("S_DAG", "SQRT_X_DAG"),
+    "H_XY": ("S_DAG", "SQRT_X", "SQRT_X"),
+    "H_YZ": ("S", "S", "SQRT_X_DAG"),
+    "SQRT_Y": ("S", "SQRT_X_DAG", "S_DAG"),
+    "SQRT_Y_DAG": ("S", "SQRT_X", "S_DAG"),
+}
+
+
+def decompose_abstract_1q_gates(circuit: stim.Circuit) -> stim.Circuit:
+    """Expand abstract one-qubit Clifford gates before noise insertion.
+
+    The circuit generators and Chromobius-derived optimizers may use compact
+    Clifford names such as C_XYZ as internal representatives of a rotation.
+    These names are not the intended physical gate basis for circuit-level
+    noise. Expand them after all circuit optimizations have run, but before
+    adding noise, so each physical gate receives its own one-qubit noise event.
+
+    H is intentionally not decomposed.
+    """
+    out = stim.Circuit()
+    moment: list[stim.CircuitInstruction] = []
+    annotation_names = {
+        "DETECTOR",
+        "OBSERVABLE_INCLUDE",
+        "QUBIT_COORDS",
+        "SHIFT_COORDS",
+        "MPAD",
+    }
+
+    def flush_moment() -> None:
+        nonlocal moment, out
+        if not moment:
+            return
+        layer_count = max(
+            len(ABSTRACT_1Q_GATE_DECOMPOSITIONS.get(inst.name, (inst.name,)))
+            for inst in moment
+        )
+        layers = [stim.Circuit() for _ in range(layer_count)]
+        for inst in moment:
+            replacement = ABSTRACT_1Q_GATE_DECOMPOSITIONS.get(inst.name)
+            if replacement is None:
+                layers[0].append(inst)
+                continue
+            args = inst.gate_args_copy()
+            if args:
+                raise ValueError(f"Cannot decompose {inst.name} with gate arguments: {args}")
+            targets = inst.targets_copy()
+            for k, gate in enumerate(replacement):
+                layers[k].append(gate, targets)
+
+        for k, layer in enumerate(layers):
+            out += layer
+            if k + 1 < len(layers):
+                out.append("TICK")
+        moment = []
+
+    for inst in circuit:
+        if isinstance(inst, stim.CircuitRepeatBlock):
+            flush_moment()
+            out.append(
+                stim.CircuitRepeatBlock(
+                    inst.repeat_count,
+                    decompose_abstract_1q_gates(inst.body_copy()),
+                )
+            )
+            continue
+
+        if inst.name == "TICK":
+            flush_moment()
+            out.append(inst)
+            continue
+        if inst.name in annotation_names:
+            flush_moment()
+            out.append(inst)
+            continue
+        moment.append(inst)
+    flush_moment()
+    return out
+
+
 class CircuitNoiseInserter:
     """Injects noise into a stim circuit by walking its instruction stream.
 
@@ -168,6 +250,7 @@ class CircuitNoiseInserter:
 
         This keeps the original behavior of the pre-refactor implementation.
         """
+        circuit = decompose_abstract_1q_gates(circuit)
         noisy_circuit = stim.Circuit()
         all_qubits = set(range(circuit.num_qubits))
 
@@ -267,12 +350,27 @@ class CircuitNoiseInserter:
                     )
                 continue
 
-            if name in {"H", "S", "SQRT_X", "SQRT_Y", "X", "Y", "Z"}:
+            if name in {
+                "H",
+                "H_XY",
+                "H_YZ",
+                "S",
+                "S_DAG",
+                "SQRT_X",
+                "SQRT_X_DAG",
+                "SQRT_Y",
+                "SQRT_Y_DAG",
+                "C_XYZ",
+                "C_ZYX",
+                "X",
+                "Y",
+                "Z",
+            }:
                 if not step_is_perfect and self.noise.one_q_gate_dpl > 0 and qubits:
                     noisy_circuit.append("DEPOLARIZE1", qubits, [self.noise.one_q_gate_dpl])
                 continue
 
-            if name in {"CNOT", "CX", "CZ", "CY"}:
+            if name in {"CNOT", "CX", "CZ", "CY", "ISWAP", "ISWAP_DAG", "SWAP", "CXSWAP", "CZSWAP", "SWAPCX"}:
                 if not step_is_perfect and self.noise.two_q_gate_dpl > 0 and qubits:
                     noisy_circuit.append("DEPOLARIZE2", qubits, [self.noise.two_q_gate_dpl])
                 continue
@@ -296,6 +394,7 @@ class CircuitNoiseInserter:
         - When `unroll_repeat_blocks=True`, REPEAT blocks are expanded so each iteration
           receives independently sampled noise (more realistic time variation).
         """
+        circuit = decompose_abstract_1q_gates(circuit)
         rng = self._rng_from_seed_or_rng(seed=seed, rng=rng)
         noisy_circuit = stim.Circuit()
         all_qubits = set(range(circuit.num_qubits))
@@ -437,7 +536,22 @@ class CircuitNoiseInserter:
                                 noisy_circuit.append(err_gate, [q], [p])
                 continue
 
-            if name in {"H", "S", "SQRT_X", "SQRT_Y", "X", "Y", "Z"}:
+            if name in {
+                "H",
+                "H_XY",
+                "H_YZ",
+                "S",
+                "S_DAG",
+                "SQRT_X",
+                "SQRT_X_DAG",
+                "SQRT_Y",
+                "SQRT_Y_DAG",
+                "C_XYZ",
+                "C_ZYX",
+                "X",
+                "Y",
+                "Z",
+            }:
                 if not step_is_perfect and self.noise.one_q_gate_dpl > 0 and qubits:
                     for q in qubits:
                         p = self._sample_probability(rng=rng, mean=self.noise.one_q_gate_dpl)
@@ -445,7 +559,7 @@ class CircuitNoiseInserter:
                             noisy_circuit.append("DEPOLARIZE1", [q], [p])
                 continue
 
-            if name in {"CNOT", "CX", "CZ", "CY"}:
+            if name in {"CNOT", "CX", "CZ", "CY", "ISWAP", "ISWAP_DAG", "SWAP", "CXSWAP", "CZSWAP", "SWAPCX"}:
                 if not step_is_perfect and self.noise.two_q_gate_dpl > 0 and qubits:
                     if len(qubits) % 2 != 0:
                         raise ValueError(f"2q gate '{name}' has odd number of qubit targets: {qubits}")

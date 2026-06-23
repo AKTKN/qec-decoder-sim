@@ -134,6 +134,7 @@ def make_topological_memory_circuit(
     diameter: int,
     noise_model: NoiseModelName | str,
     noise_strength: float,
+    convert_to_cz: bool | None = None,
 ) -> stim.Circuit:
     style_key = style.strip()
     if style_key not in _STYLE_MAP:
@@ -173,7 +174,8 @@ def make_topological_memory_circuit(
         )
 
     noise = _NOISE_MODEL_BUILDERS[noise_key](float(noise_strength))
-    convert_to_cz = noise_key == "si1000"
+    if convert_to_cz is None:
+        convert_to_cz = noise_key == "si1000"
     return _chromobius_make_circuit(
         style=_STYLE_MAP[style_key],
         noise_model=noise,

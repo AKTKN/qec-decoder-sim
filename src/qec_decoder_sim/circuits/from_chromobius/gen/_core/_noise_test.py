@@ -2,6 +2,8 @@ import stim
 
 import gen
 from gen._core._noise import (
+    ABSTRACT_1Q_GATE_DECOMPOSITIONS,
+    decompose_abstract_1q_gates,
     _measure_basis,
     _iter_split_op_moments,
     occurs_in_classical_control_system,
@@ -26,6 +28,47 @@ def test_measure_basis():
     assert f("MPP X5") == "X"
     assert f("MPP X0*X2") == "XX"
     assert f("MPP Y0*Z2*X3") == "YZX"
+
+
+def _tableau_for(gates: tuple[str, ...]) -> stim.Tableau:
+    result = stim.Tableau(1)
+    for gate in gates:
+        result.append(stim.Tableau.from_named_gate(gate), [0])
+    return result
+
+
+def test_abstract_1q_gate_decomposition_table_is_equivalent():
+    for abstract_gate, physical_gates in ABSTRACT_1Q_GATE_DECOMPOSITIONS.items():
+        assert _tableau_for((abstract_gate,)) == _tableau_for(physical_gates)
+
+
+def test_decompose_abstract_1q_gates_before_gen_noise_insertion():
+    circuit = stim.Circuit(
+        """
+        C_XYZ 0
+        H 1
+        TICK
+        """
+    )
+    decomposed = decompose_abstract_1q_gates(circuit)
+    assert decomposed == stim.Circuit(
+        """
+        SQRT_X 0
+        H 1
+        TICK
+        S 0
+        TICK
+        """
+    )
+
+    noisy = NoiseModel.si1000(0.01).noisy_circuit(circuit)
+    text = str(noisy)
+    assert "C_XYZ" not in text
+    assert "SQRT_X 0" in text
+    assert "S 0" in text
+    assert "H 1" in text
+    assert "DEPOLARIZE1(0.001) 0 1" in text
+    assert "S 0\nDEPOLARIZE1(0.001) 0 1" in text
 
 
 def test_iter_split_op_moments():

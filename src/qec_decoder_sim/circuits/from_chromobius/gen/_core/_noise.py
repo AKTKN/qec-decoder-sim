@@ -24,6 +24,76 @@ OP_TO_MEASURE_BASES = {
     "MPP": "*",
 }
 
+ABSTRACT_1Q_GATE_DECOMPOSITIONS: dict[str, tuple[str, ...]] = {
+    "C_XYZ": ("SQRT_X", "S"),
+    "C_ZYX": ("S_DAG", "SQRT_X_DAG"),
+    "H_XY": ("S_DAG", "SQRT_X", "SQRT_X"),
+    "H_YZ": ("S", "S", "SQRT_X_DAG"),
+    "SQRT_Y": ("S", "SQRT_X_DAG", "S_DAG"),
+    "SQRT_Y_DAG": ("S", "SQRT_X", "S_DAG"),
+}
+
+
+def decompose_abstract_1q_gates(circuit: stim.Circuit) -> stim.Circuit:
+    """Expand abstract one-qubit Clifford names before noise insertion.
+
+    H is intentionally kept as H. This pass runs after circuit optimization and
+    immediately before noise insertion, causing each basis gate in a composite
+    Clifford to receive its own one-qubit noise event.
+    """
+    out = stim.Circuit()
+    moment: list[stim.CircuitInstruction] = []
+
+    def flush_moment() -> None:
+        nonlocal moment, out
+        if not moment:
+            return
+        layer_count = max(
+            len(ABSTRACT_1Q_GATE_DECOMPOSITIONS.get(inst.name, (inst.name,)))
+            for inst in moment
+        )
+        layers = [stim.Circuit() for _ in range(layer_count)]
+        for inst in moment:
+            replacement = ABSTRACT_1Q_GATE_DECOMPOSITIONS.get(inst.name)
+            if replacement is None:
+                layers[0].append(inst)
+                continue
+            args = inst.gate_args_copy()
+            if args:
+                raise ValueError(f"Cannot decompose {inst.name} with gate arguments: {args}")
+            targets = inst.targets_copy()
+            for k, gate in enumerate(replacement):
+                layers[k].append(gate, targets)
+
+        for k, layer in enumerate(layers):
+            out += layer
+            if k + 1 < len(layers):
+                out.append("TICK")
+        moment = []
+
+    for inst in circuit:
+        if isinstance(inst, stim.CircuitRepeatBlock):
+            flush_moment()
+            out.append(
+                stim.CircuitRepeatBlock(
+                    inst.repeat_count,
+                    decompose_abstract_1q_gates(inst.body_copy()),
+                )
+            )
+            continue
+
+        if inst.name == "TICK":
+            flush_moment()
+            out.append(inst)
+            continue
+        if inst.name in ANNOTATION_OPS:
+            flush_moment()
+            out.append(inst)
+            continue
+        moment.append(inst)
+    flush_moment()
+    return out
+
 
 class NoiseRule:
     """Describes how to add noise to an operation."""
@@ -426,6 +496,7 @@ class NoiseModel:
         Returns:
             The noisy version of the circuit.
         """
+        circuit = decompose_abstract_1q_gates(circuit)
         if system_qubit_indices is None:
             system_qubit_indices = set(range(circuit.num_qubits))
         if immune_qubit_indices is None:
