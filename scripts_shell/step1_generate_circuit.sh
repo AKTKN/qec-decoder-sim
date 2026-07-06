@@ -39,16 +39,17 @@ export PYTHONPATH="$ROOT_DIR/src"
 "$PYTHON_BIN" -m qec_decoder_sim.circuits.generate_circuits \
 	--code bivariate_bicycle_code_Z \
 	--out_dir generated_circuits/bivariate_bicycle \
-	--noise_model phenomenological \
+	--noise_model uniform \
 	--rounds "d" \
 	--distance 6 \
-	--noise_strength 0.006\
+	--noise_strength 0.003\
 	--l 6 --m 6 \
 	--a_x_pows 3 \
 	--a_y_pows 1,2 \
 	--b_x_pows 1,2 \
 	--b_y_pows 3 \
-	# --ibm_reproduce \
+	--ibm_reproduce \
+	--use_both \
 
 
 # =====  BB code params list =====

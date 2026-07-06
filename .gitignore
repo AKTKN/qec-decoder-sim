@@ -41,3 +41,4 @@ cluster_data/
 analysis/
 refs/
 directional_benchmark/
+scripts_shell/fetch_cluster.sh
